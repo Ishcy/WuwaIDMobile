@@ -1,0 +1,100 @@
+:root {
+  font-family: system-ui, sans-serif;
+  color: #18181b;
+  background: #f4f4f5;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  color-scheme: light dark;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  display: grid;
+  place-items: center;
+}
+
+.container {
+  width: min(32rem, calc(100% - 2rem));
+}
+
+.eyebrow {
+  margin: 0 0 0.5rem;
+  color: #52525b;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(2rem, 8vw, 3rem);
+}
+
+.description {
+  margin: 0.75rem 0 0;
+  color: #52525b;
+}
+
+.row {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1.5rem;
+}
+
+input,
+button {
+  border: 1px solid #a1a1aa;
+  border-radius: 0.5rem;
+  padding: 0.7rem 0.9rem;
+  font: inherit;
+}
+
+input {
+  min-width: 0;
+  flex: 1;
+}
+
+button {
+  cursor: pointer;
+  border-color: #27272a;
+  color: #fff;
+  background: #27272a;
+}
+
+button:hover {
+  background: #3f3f46;
+}
+
+#greet-msg {
+  min-height: 1.5rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color: #fafafa;
+    background: #18181b;
+  }
+
+  .eyebrow,
+  .description {
+    color: #a1a1aa;
+  }
+
+  input {
+    color: inherit;
+    background: #27272a;
+  }
+
+  button {
+    color: #18181b;
+    background: #e4e4e7;
+    border-color: #e4e4e7;
+  }
+
+  button:hover {
+    background: #d4d4d8;
+  }
+}

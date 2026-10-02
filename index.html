@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="WuwaIDMobile, kerangka aplikasi Tauri untuk desktop dan Android." />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <title>WuwaIDMobile</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+
+  <body>
+    <main class="container">
+      <p class="eyebrow">Tauri 2 · Desktop dan Android</p>
+      <h1>WuwaIDMobile</h1>
+      <p class="description">Kerangka minimal dengan frontend TypeScript dan backend Rust.</p>
+
+      <form class="row" id="greet-form">
+        <input
+          id="greet-input"
+          name="name"
+          autocomplete="name"
+          placeholder="Masukkan nama..."
+          required
+        />
+        <button type="submit">Sapa</button>
+      </form>
+      <p id="greet-msg" role="status" aria-live="polite"></p>
+    </main>
+  </body>
+</html>

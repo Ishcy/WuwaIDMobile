@@ -1,109 +1,46 @@
-<div align="center">
-  <img src="app/src/main/res/drawable-nodpi/app_icon.png" width="112" alt="WuwaID Mobile">
+# WuwaIDMobile
 
-# WuwaID Mobile
+Kerangka aplikasi **Tauri 2** untuk desktop dan Android. Frontend menggunakan
+TypeScript, HTML, CSS, dan Vite; backend aplikasi menggunakan Rust. Folder
+Android yang dihasilkan Tauri berada di `src-tauri/gen/android/`.
 
-  **Pasang patch Bahasa Indonesia Wuthering Waves langsung dari Android.**
+## Persiapan
 
-  Root • Shizuku • Verifikasi checksum • Instalasi transaksional
+- Node.js 24 dan npm
+- Rust stable melalui rustup
+- Android Studio, JDK 17, Android SDK, dan NDK untuk pengembangan Android
+- Dependensi sistem Tauri untuk target desktop yang digunakan
 
-  [Unduh APK](https://github.com/TitoTFP/WuwaIDMobile/releases/latest) · [Patch WuwaID](https://github.com/TitoTFP/WuwaID)
-</div>
+Panduan lengkap Android ada di [`docs/android.md`](docs/android.md).
 
-## Tentang
+## Menjalankan
 
-WuwaID Mobile adalah launcher Android komunitas untuk memasang, memperbarui, memeriksa, dan menghapus patch Bahasa Indonesia pada Wuthering Waves Global. Aplikasi mengambil patch resmi WuwaID dari GitHub Releases, memverifikasinya, lalu menulis file melalui root atau Shizuku.
+```sh
+npm ci
 
-## Fitur utama
+# Desktop
+npm run tauri dev
 
-- **Root atau Shizuku** — root dipakai langsung bila tersedia, dengan fallback ke Shizuku.
-- **Instalasi aman** — ukuran dan SHA-256 diverifikasi sebelum file dipasang.
-- **Transaksional** — PAK, SIG, dan mount dipasang dengan backup serta rollback jika proses gagal.
-- **Status jelas** — menampilkan backend aktif, versi resource, hash patch, konflik, dan rilis terbaru.
-- **Pemulihan otomatis** — koneksi Shizuku pulih setelah timeout, binder mati, atau service dimulai ulang.
-- **Update aplikasi** — APK pembaruan diverifikasi sebelum installer Android dibuka.
-- **Root helper terbatas** — akses dibatasi ke direktori aplikasi/game dan tidak mengikuti symlink.
-
-## Persyaratan
-
-- Wuthering Waves Global (`com.kurogame.wutheringwaves.global`) atau Galaxy Store (`com.kurogame.wutheringwaves.samsung`).
-- Android dengan ABI `arm64-v8a`.
-- Salah satu akses berikut:
-  - root dan izin root untuk WuwaID Mobile; atau
-  - Shizuku aktif dengan izin untuk WuwaID Mobile.
-- Data game sudah selesai diunduh.
-
-## Instalasi
-
-1. Unduh APK terbaru dari [GitHub Releases](https://github.com/TitoTFP/WuwaIDMobile/releases/latest).
-2. Pasang dan buka WuwaID Mobile.
-3. Berikan izin root atau Shizuku.
-4. Tutup Wuthering Waves.
-5. Tekan tombol instal/perbarui patch.
-6. Jalankan game setelah status menunjukkan patch siap.
-
-> Selalu tutup game saat memasang, memperbarui, atau menghapus patch.
-
-## Panduan & Troubleshooting Shizuku
-
-### Android 15 & Android 16 (API 35 & 36)
-
-- **Gejala:** Shizuku aktif (Running) namun service tidak merespons.
-- **Solusi:**
-  1. Buka aplikasi **Shizuku**, tekan tombol **Stop**.
-  2. Jalankan ulang Shizuku melalui **Wireless Debugging** (lakukan pairing ulang jika koneksi terputus).
-  3. Kembali ke WuwaID Mobile dan tekan tombol **Hubungkan ulang**.
-
-## Build dari source
-
-Butuh JDK 17, Android SDK 35, NDK `27.0.12077973`, dan CMake 3.22.1.
-
-```bash
-git clone https://github.com/TitoTFP/WuwaIDMobile.git
-cd WuwaIDMobile
-./gradlew test lint assembleDebug
+# Android: jalankan emulator atau sambungkan perangkat dengan USB debugging
+adb devices
+npm run tauri android dev
 ```
 
-APK debug tersedia di:
+## Pemeriksaan dan build Android
 
-```text
-app/build/outputs/apk/debug/app-debug.apk
+```sh
+npm run check
+npm run build
+cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+cargo test --manifest-path src-tauri/Cargo.toml --all-targets
+npm run tauri android build -- --debug --apk --target aarch64
 ```
 
-### Release build
+APK tersebut adalah build **debug** untuk verifikasi, bukan paket rilis
+bertanda tangan. Konfigurasi penandatanganan Android belum disiapkan.
 
-Release signing memakai environment variable berikut:
+GitHub Actions menjalankan pemeriksaan frontend/Rust dan mengunggah APK debug
+sebagai artifact pada workflow CI.
 
-```text
-ANDROID_KEYSTORE_PATH
-ANDROID_KEYSTORE_PASSWORD
-ANDROID_KEY_ALIAS
-ANDROID_KEY_PASSWORD
-```
-
-```bash
-./gradlew clean test lint assembleRelease
-```
-
-Setiap rilis wajib menaikkan `versionCode`. `versionName` harus sama dengan tag tanpa awalan `v`.
-
-## Pengujian
-
-```bash
-./gradlew test lint
-python3 app/src/test/native/root_helper_security_test.py
-```
-
-CI juga membangun APK debug, memeriksa packaged root helper, dan menerbitkan laporan test, coverage, serta lint.
-
-## Kredit
-
-- Patch Bahasa Indonesia: [TitoTFP/WuwaID](https://github.com/TitoTFP/WuwaID)
-- Shizuku: [RikkaApps/Shizuku](https://github.com/RikkaApps/Shizuku)
-- Referensi metode Android: CallMeDangDev/WuwaVHLauncher dan APK DangDevVH
-
-## Lisensi
-
-Dirilis di bawah [GNU General Public License v3.0](LICENSE).
-
-WuwaID adalah proyek komunitas tidak resmi dan tidak berafiliasi dengan Kuro Games.
+Panduan kontribusi ada di [`CONTRIBUTING.md`](CONTRIBUTING.md); riwayat perubahan
+ada di [`CHANGELOG.md`](CHANGELOG.md).
