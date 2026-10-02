@@ -18,4 +18,11 @@
 
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
+
+-keep class com.titotfp.wuwaid.storage.GameStoragePlugin { *; }
+-keep class com.titotfp.wuwaid.storage.StorageArgs { *; }
+-keep class com.titotfp.wuwaid.storage.ControlArgs { *; }
+-keep class com.titotfp.wuwaid.storage.StorageUserService { *; }
+-keep interface com.titotfp.wuwaid.storage.IStorageUserService { *; }
+-keep class com.titotfp.wuwaid.storage.IStorageUserService$* { *; }
 #-renamesourcefileattribute SourceFile

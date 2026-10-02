@@ -31,3 +31,15 @@ local.properties
 *.jks
 *.keystore
 keystore.properties
+
+# Decompile output (unpacked APK, apktool decode, logs, ~1.2 GB) — regenerate, don't commit
+reverse_engineer/out/
+
+# Third-party APK under analysis (152 MB) — fetch separately, don't commit
+reverse_engineer/*.apk
+
+# Python bytecode from the RE helper scripts
+__pycache__/
+*.pyc
+reverse_engineer/
+WATCHDOG.yml

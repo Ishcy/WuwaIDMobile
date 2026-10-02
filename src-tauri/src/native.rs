@@ -1,0 +1,346 @@
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use serde::Serialize;
+#[cfg(target_os = "android")]
+use tauri::Emitter;
+use tauri::{AppHandle, Manager};
+
+use crate::pak::model::{InstallStatus, PakResult, Release, GAME_PACKAGE};
+#[cfg(target_os = "android")]
+use crate::pak::{
+    installer,
+    model::{DeviceProbe, ResourceLayout},
+    release,
+};
+
+#[derive(Default)]
+pub struct NativeState {
+    busy: AtomicBool,
+    release: Mutex<Option<Release>>,
+}
+
+struct BusyGuard(Arc<NativeState>);
+impl BusyGuard {
+    fn acquire(state: Arc<NativeState>) -> PakResult<Self> {
+        state
+            .busy
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .map_err(|_| "Operasi lain masih berjalan.".to_string())?;
+        Ok(Self(state))
+    }
+}
+impl Drop for BusyGuard {
+    fn drop(&mut self) {
+        self.0.busy.store(false, Ordering::Release);
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Dashboard {
+    mode: &'static str,
+    platform_supported: bool,
+    storage_writable: bool,
+    blocker: Option<String>,
+    release: Option<Release>,
+    uid_available: bool,
+    game: Game,
+    resource: Resource,
+    shizuku: Shizuku,
+    patch: InstallStatus,
+    uid: Uid,
+    last_checked: u64,
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Game {
+    installed: bool,
+    version: String,
+    package_name: &'static str,
+}
+#[derive(Serialize)]
+struct Resource {
+    ready: bool,
+    version: String,
+}
+#[derive(Serialize)]
+struct Shizuku {
+    running: bool,
+    granted: bool,
+}
+#[derive(Serialize)]
+struct Uid {
+    original: &'static str,
+    custom: Option<String>,
+}
+#[derive(Serialize)]
+pub struct Diagnostics {
+    filename: &'static str,
+    content: String,
+}
+
+fn timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+fn empty_status() -> InstallStatus {
+    InstallStatus {
+        installed: false,
+        healthy: false,
+        recovery_pending: false,
+        version: String::new(),
+        message: None,
+    }
+}
+fn current_release(app: &AppHandle) -> PakResult<Option<Release>> {
+    app.state::<Arc<NativeState>>()
+        .release
+        .lock()
+        .map(|value| value.clone())
+        .map_err(|_| "State rilis tidak dapat dibaca.".to_string())
+}
+fn fetch_release(app: &AppHandle) -> PakResult<Release> {
+    let result = crate::pak::release::latest();
+    let state = app.state::<Arc<NativeState>>();
+    *state
+        .release
+        .lock()
+        .map_err(|_| "State rilis tidak dapat diperbarui.".to_string())? =
+        result.as_ref().ok().cloned();
+    result
+}
+
+#[cfg(target_os = "android")]
+fn bridge(app: &AppHandle) -> tauri::State<'_, crate::android::MobileBridge<tauri::Wry>> {
+    app.state::<crate::android::MobileBridge<tauri::Wry>>()
+}
+#[cfg(target_os = "android")]
+fn physical_prerequisites(probe: &DeviceProbe) -> PakResult<()> {
+    if !probe.game_installed {
+        return Err("Wuthering Waves Global belum terpasang.".into());
+    }
+    if !probe.shizuku_running {
+        return Err("Jalankan Shizuku terlebih dahulu.".into());
+    }
+    if !probe.shizuku_granted {
+        return Err("Berikan izin Shizuku terlebih dahulu.".into());
+    }
+    if !probe.root_readable || !probe.root_writable {
+        return Err("Shizuku tidak dapat membaca/menulis resource game. Selesaikan unduhan resource di game.".into());
+    }
+    Ok(())
+}
+#[cfg(target_os = "android")]
+fn compatible_line(version: &str, expected: &str) -> bool {
+    let parse = |value: &str| -> Option<[u32; 3]> {
+        let parts: Vec<u32> = value
+            .split('.')
+            .map(str::parse)
+            .collect::<Result<_, _>>()
+            .ok()?;
+        parts.try_into().ok()
+    };
+    match (parse(version), parse(expected)) {
+        (Some(actual), Some(expected)) => actual[..2] == expected[..2],
+        _ => false,
+    }
+}
+#[cfg(target_os = "android")]
+fn check_compatibility(
+    probe: &DeviceProbe,
+    layout: &ResourceLayout,
+    release: &Release,
+) -> PakResult<()> {
+    if !compatible_line(&probe.game_version, &release.game_version)
+        || !compatible_line(&layout.version, &release.game_version)
+    {
+        return Err(format!(
+            "Rilis {} tidak sesuai dengan game {} / resource {}. Pemasangan dibatalkan.",
+            release.tag, probe.game_version, layout.version
+        ));
+    }
+    Ok(())
+}
+
+fn load_dashboard(app: &AppHandle, refresh_release: bool) -> PakResult<Dashboard> {
+    let release_result = if refresh_release {
+        fetch_release(app).map(Some)
+    } else {
+        current_release(app)
+    };
+    let (selected_release, release_error) = match release_result {
+        Ok(value) => (value, None),
+        Err(error) => (None, Some(error)),
+    };
+    #[cfg(not(target_os = "android"))]
+    {
+        Ok(Dashboard {
+            mode: "native", platform_supported: false, storage_writable: false,
+            blocker: Some(match release_error {
+                Some(error) => format!("Pemasangan .pak memerlukan Android dan Shizuku. Rilis latest belum dapat dibaca: {error}"),
+                None => "Pemasangan .pak memerlukan Android dan Shizuku. Desktop tidak menulis direktori game.".into(),
+            }),
+            release: selected_release, uid_available: false,
+            game: Game { installed: false, version: String::new(), package_name: GAME_PACKAGE },
+            resource: Resource { ready: false, version: String::new() },
+            shizuku: Shizuku { running: false, granted: false }, patch: empty_status(),
+            uid: Uid { original: "", custom: None }, last_checked: timestamp(),
+        })
+    }
+    #[cfg(target_os = "android")]
+    {
+        let storage = bridge(app);
+        let probe = storage.probe()?;
+        let mut blocker = release_error.or_else(|| probe.storage_error.clone());
+        let mut resource = Resource {
+            ready: false,
+            version: String::new(),
+        };
+        let mut patch = empty_status();
+        if probe.shizuku_running && probe.shizuku_granted && probe.root_readable {
+            match installer::discover(&*storage) {
+                Ok(layout) => {
+                    resource = Resource {
+                        ready: true,
+                        version: layout.version.clone(),
+                    };
+                    match installer::inspect(&*storage, &layout) {
+                        Ok(status) => patch = status,
+                        Err(error) => {
+                            patch.message = Some(error.clone());
+                            blocker = Some(error);
+                        }
+                    }
+                }
+                Err(error) => blocker = Some(error),
+            }
+        }
+        Ok(Dashboard {
+            mode: "native",
+            platform_supported: true,
+            storage_writable: probe.root_writable,
+            blocker,
+            release: selected_release,
+            uid_available: false,
+            game: Game {
+                installed: probe.game_installed,
+                version: probe.game_version,
+                package_name: GAME_PACKAGE,
+            },
+            resource,
+            shizuku: Shizuku {
+                running: probe.shizuku_running,
+                granted: probe.shizuku_granted,
+            },
+            patch,
+            uid: Uid {
+                original: "",
+                custom: None,
+            },
+            last_checked: timestamp(),
+        })
+    }
+}
+
+#[tauri::command]
+pub async fn wuwa_load(app: AppHandle) -> PakResult<Dashboard> {
+    tauri::async_runtime::spawn_blocking(move || load_dashboard(&app, true))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn wuwa_run(app: AppHandle, operation: String) -> PakResult<Dashboard> {
+    let guard = BusyGuard::acquire(Arc::clone(app.state::<Arc<NativeState>>().inner()))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = (&app, operation);
+            Err("Pemasangan nyata memerlukan Android dan Shizuku.".into())
+        }
+        #[cfg(target_os = "android")]
+        {
+            let storage = bridge(&app);
+            match operation.as_str() {
+                "request_permission" | "launch_game" => storage.control(&operation)?,
+                "install" | "repair" | "uninstall" => {
+                    let probe = storage.probe()?;
+                    physical_prerequisites(&probe)?;
+                    let layout = installer::discover(&*storage)?;
+                    let progress = |value| {
+                        let _ = app.emit("wuwa-progress", value);
+                    };
+                    if operation == "uninstall" {
+                        installer::uninstall(&*storage, &layout, &progress)?;
+                    } else if operation == "repair"
+                        && installer::inspect(&*storage, &layout)?.recovery_pending
+                    {
+                        installer::recover(&*storage, &layout, &progress)?;
+                    } else {
+                        let release = fetch_release(&app)?;
+                        check_compatibility(&probe, &layout, &release)?;
+                        let cache = app
+                            .path()
+                            .app_cache_dir()
+                            .map_err(|e| e.to_string())?
+                            .join("release-paks");
+                        let pak = release::download(&release, &cache, &progress)?;
+                        if operation == "repair" {
+                            installer::repair(&*storage, &layout, &release, &pak, &progress)?;
+                        } else {
+                            installer::install(&*storage, &layout, &release, &pak, &progress)?;
+                        }
+                    }
+                }
+                "apply_uid" | "restore_uid" => return Err(
+                    "Custom UID masih merupakan pratinjau browser, bukan modifikasi game nyata."
+                        .into(),
+                ),
+                _ => return Err("Operasi tidak dikenal.".into()),
+            }
+            load_dashboard(&app, false)
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn wuwa_open_setup(app: AppHandle, target: String) -> PakResult<()> {
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = (&app, target);
+            Err("Pengaturan Shizuku/game hanya tersedia di Android.".into())
+        }
+        #[cfg(target_os = "android")]
+        {
+            let action = match target.as_str() {
+                "game" => "open_store",
+                "shizuku" => "open_shizuku",
+                _ => return Err("Target pengaturan tidak dikenal.".into()),
+            };
+            bridge(&app).control(action)
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn wuwa_diagnostics(app: AppHandle) -> PakResult<Diagnostics> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let dashboard = load_dashboard(&app, false)?;
+        let content = serde_json::to_string_pretty(&serde_json::json!({
+            "mock": false, "backend": if cfg!(target_os = "android") { "android-shizuku" } else { "desktop-unsupported" }, "dashboard": dashboard,
+        })).map_err(|e| e.to_string())?;
+        Ok(Diagnostics { filename: "wuwaidmobile-diagnostics.json", content })
+    }).await.map_err(|e| e.to_string())?
+}

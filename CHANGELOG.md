@@ -2,5 +2,31 @@
 
 ## Unreleased
 
+- Fix Resource Mount entries to use extensionless PAK base paths, matching the
+  launcher and Android bytecode rather than physical filenames.
+- Mark old owned descriptors unhealthy and allow transactional repair or safe
+  uninstall; preserve previous snapshots on failed format migration.
+- Replace the descriptor wording assertion with file-resolution/hash checks and
+  add previous-format migration, removal, rollback and unknown-format regression coverage.
+
+- Add latest stable WuwaID GitHub release discovery and streaming PAK downloads
+  with size/SHA-256 verification and re-verified private cache.
+- Implement Android Shizuku UserService/AIDL storage access and PFD streaming,
+  restricting writes to owned paths inside numeric game-resource versions.
+- Add resource/signature discovery, separate priority-99 mounts, ownership
+  metadata, transactional install/repair/uninstall, and exact snapshot recovery
+  across resource updates without requiring release metadata.
+- Use native Tauri IPC and progress events in the shell; retain browser-only
+  simulation and custom UID previews, with explicit desktop platform limits.
+
+- Build the Indonesian Beranda, Kustomisasi, and Perawatan frontend with responsive
+  desktop/sidebar and mobile/bottom navigation.
+- Add explicitly simulated Tauri IPC for device scenarios, translation install and
+  repair, permission flow, custom UID display, and JSON diagnostics; persist mock state.
+- Replace font customization with custom UID input, live preview, apply/restore
+  actions, and persisted display state without changing the account UID.
+- Add operation progress and gating, and uninstall confirmation with UID restoration.
+- Remove the unused greeting form and Rust greeting command.
+
 - Replace the previous Android launcher with a minimal Tauri 2 desktop/Android shell.
 - Add GitHub CI for frontend, Rust, and Android debug APK builds.
