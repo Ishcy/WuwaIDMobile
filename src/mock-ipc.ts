@@ -230,6 +230,8 @@ async function perform(
         if (operation === "apply_uid") {
           if (typeof uidText !== "string" || !uidText.trim())
             throw new Error("Masukkan teks UID kustom.");
+          if (/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u.test(uidText))
+            throw new Error("Teks UID tidak boleh memuat karakter kontrol atau pemisah baris.");
           uidText = uidText.trim();
           if (uidText.length > UID_MAX_LENGTH)
             throw new Error(`Teks UID maksimal ${UID_MAX_LENGTH} karakter.`);

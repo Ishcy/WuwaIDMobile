@@ -11,6 +11,7 @@ use super::model::{
     PATCH_DIRECTORY, PATCH_FILENAME, PRIORITY, SIGNATURE_FILENAME,
 };
 use super::storage::Storage;
+use super::uid;
 
 const SCHEMA_VERSION: u8 = 1;
 const JOURNAL_LIMIT: u64 = 64 * 1024;
@@ -34,6 +35,10 @@ struct Owner {
     signature_sha256: String,
     signature_sha1: String,
     mount_sha256: String,
+    #[serde(default)]
+    source_sha256: Option<String>,
+    #[serde(default)]
+    custom_uid: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -120,6 +125,7 @@ pub fn inspect(storage: &dyn Storage, layout: &ResourceLayout) -> PakResult<Inst
         issues.push("An installer transaction or orphan lifecycle file needs recovery".to_owned());
     }
 
+    let mut custom_uid = None;
     match owner {
         None if installed => issues.push(format!(
             "Installer artifacts exist without valid ownership metadata at {owner_path}"
@@ -131,6 +137,7 @@ pub fn inspect(storage: &dyn Storage, layout: &ResourceLayout) -> PakResult<Inst
             if let Err(error) = verify_owned_content(storage, &layout.version, &owner) {
                 issues.push(error);
             }
+            custom_uid = owner.custom_uid;
         }
         None => {}
     }
@@ -146,6 +153,7 @@ pub fn inspect(storage: &dyn Storage, layout: &ResourceLayout) -> PakResult<Inst
         } else {
             Some(issues.join("; "))
         },
+        custom_uid,
     })
 }
 
@@ -154,10 +162,12 @@ pub fn install(
     layout: &ResourceLayout,
     release: &Release,
     pak: &Path,
+    custom_uid: Option<&str>,
     progress: &ProgressCallback,
 ) -> PakResult<InstallStatus> {
+    let custom_uid = custom_uid.map(uid::validate_text).transpose()?;
     recover(storage, layout, progress)?;
-    install_current(storage, layout, release, pak, progress)
+    install_current(storage, layout, release, pak, custom_uid, progress)
 }
 
 pub fn repair(
@@ -165,10 +175,12 @@ pub fn repair(
     layout: &ResourceLayout,
     release: &Release,
     pak: &Path,
+    custom_uid: Option<&str>,
     progress: &ProgressCallback,
 ) -> PakResult<InstallStatus> {
+    let custom_uid = custom_uid.map(uid::validate_text).transpose()?;
     recover(storage, layout, progress)?;
-    install_current(storage, layout, release, pak, progress)
+    install_current(storage, layout, release, pak, custom_uid, progress)
 }
 
 pub fn recover(
@@ -259,6 +271,7 @@ fn install_current(
     layout: &ResourceLayout,
     release: &Release,
     pak: &Path,
+    custom_uid: Option<&str>,
     progress: &ProgressCallback,
 ) -> PakResult<InstallStatus> {
     validate_version(&layout.version)?;
@@ -304,8 +317,7 @@ fn install_current(
     }
 
     let source_sha256 = hash_local_file(pak)?;
-    let expected_sha256 = release.sha256.to_ascii_lowercase();
-    if source_sha256 != expected_sha256 {
+    if !source_sha256.eq_ignore_ascii_case(&release.sha256) {
         return Err("Downloaded PAK SHA-256 does not match release metadata".to_owned());
     }
     let source_stats =
@@ -317,6 +329,19 @@ fn install_current(
             source_stats.len()
         ));
     }
+    let derived = if let Some(text) = custom_uid {
+        notify(progress, 70, "Menyiapkan UID kustom");
+        Some(uid::prepare(pak, text)?)
+    } else {
+        None
+    };
+    let payload = derived.as_ref().map(|pak| pak.path()).unwrap_or(pak);
+    let expected_sha256 = if derived.is_some() {
+        hash_local_file(payload)?
+    } else {
+        source_sha256.clone()
+    };
+    let expected_size = derived.as_ref().map(|pak| pak.size).unwrap_or(release.size);
 
     storage.force_stop()?;
     notify(progress, 74, "Menyiapkan PAK dan signature terverifikasi");
@@ -326,15 +351,15 @@ fn install_current(
     let stages = stage_paths(&layout.version);
     let mut staged_hashes: Vec<Option<String>> = vec![None; SLOTS.len()];
     let stage_result = (|| {
-        storage.write_from_file(&stages[0], pak)?;
+        storage.write_from_file(&stages[0], payload)?;
         staged_hashes[0] = Some(expected_sha256.clone());
         let staged_pak_sha256 = checked_hash(storage, &stages[0], "sha256")?;
         staged_hashes[0] = Some(staged_pak_sha256.clone());
         if staged_pak_sha256 != expected_sha256 {
-            return Err("Staged PAK SHA-256 does not match release metadata".to_owned());
+            return Err("Staged PAK SHA-256 does not match the verified payload".to_owned());
         }
-        if storage.stat(&stages[0])?.size != release.size {
-            return Err("Staged PAK size does not match release metadata".to_owned());
+        if storage.stat(&stages[0])?.size != expected_size {
+            return Err("Staged PAK size does not match the verified payload".to_owned());
         }
 
         storage.copy(&official_signature, &stages[1])?;
@@ -378,6 +403,8 @@ fn install_current(
             signature_sha256: staged_hashes[1].clone().expect("signature stage hash"),
             signature_sha1,
             mount_sha256: staged_hashes[3].clone().expect("mount stage hash"),
+            source_sha256: Some(source_sha256.clone()),
+            custom_uid: custom_uid.map(str::to_owned),
         };
         validate_owner(&owner, &layout.version)?;
         let owner_json = serde_json::to_string(&owner).map_err(|error| {
@@ -755,6 +782,18 @@ fn validate_owner(owner: &Owner, version: &str) -> PakResult<()> {
         || !valid_hash(&owner.mount_sha256, 32)
     {
         return Err("Ownership metadata contains invalid identity or content hashes".to_owned());
+    }
+    if let Some(source_hash) = &owner.source_sha256 {
+        if !valid_hash(source_hash, 32)
+            || (owner.custom_uid.is_none() && !source_hash.eq_ignore_ascii_case(&owner.pak_sha256))
+        {
+            return Err("Ownership metadata contains an invalid source PAK hash".into());
+        }
+    }
+    if let Some(text) = &owner.custom_uid {
+        if owner.source_sha256.is_none() || uid::validate_text(text)? != text {
+            return Err("Ownership metadata contains an invalid custom UID".into());
+        }
     }
     if !has_current_mount_format(owner) {
         // Previous releases persisted a filename instead of a mount base. Decode
@@ -1686,14 +1725,14 @@ mod tests {
     fn repairs_the_previous_owned_mount_format() {
         let (root, storage, pak, layout) = setup_fixture();
         let release = release(&pak, "v3.7.1-id.1");
-        install(&storage, &layout, &release, &pak, &no_progress).expect("fixture install");
+        install(&storage, &layout, &release, &pak, None, &no_progress).expect("fixture install");
         persist_previous_mount(root.path(), &layout);
         let previous = inspect(&storage, &layout).expect("previous installation");
         assert!(previous.installed && !previous.healthy && !previous.recovery_pending);
         let original_mount =
             fs::read(root.path().join("3.7.0/Mount/MountResource.txt")).expect("game mount");
-        let repaired =
-            repair(&storage, &layout, &release, &pak, &no_progress).expect("format migration");
+        let repaired = repair(&storage, &layout, &release, &pak, None, &no_progress)
+            .expect("format migration");
         assert!(repaired.installed && repaired.healthy && !repaired.recovery_pending);
         assert_mount_resolves(root.path(), &storage, &layout, &pak);
         assert_eq!(
@@ -1707,7 +1746,7 @@ mod tests {
     fn uninstalls_the_previous_owned_mount_without_repair() {
         let (root, storage, pak, layout) = setup_fixture();
         let release = release(&pak, "v3.7.1-id.1");
-        install(&storage, &layout, &release, &pak, &no_progress).expect("fixture install");
+        install(&storage, &layout, &release, &pak, None, &no_progress).expect("fixture install");
         persist_previous_mount(root.path(), &layout);
         let removed = uninstall(&storage, &layout, &no_progress).expect("remove previous format");
         assert!(!removed.installed && !removed.recovery_pending);
@@ -1725,7 +1764,15 @@ mod tests {
         let (root, storage, pak, layout) = setup_fixture();
         let storage = Arc::new(storage);
         let release = release(&pak, "v3.7.1-id.1");
-        install(storage.as_ref(), &layout, &release, &pak, &no_progress).expect("fixture install");
+        install(
+            storage.as_ref(),
+            &layout,
+            &release,
+            &pak,
+            None,
+            &no_progress,
+        )
+        .expect("fixture install");
         persist_previous_mount(root.path(), &layout);
         let paths = target_paths(&layout.version);
         let previous: Vec<_> = paths
@@ -1737,7 +1784,7 @@ mod tests {
             fail_target: target_path(&layout.version, Slot::Mount),
             failures_remaining: Arc::new(Mutex::new(1)),
         };
-        assert!(repair(&failing, &layout, &release, &pak, &no_progress).is_err());
+        assert!(repair(&failing, &layout, &release, &pak, None, &no_progress).is_err());
         for (path, bytes) in paths.iter().zip(previous) {
             assert_eq!(
                 fs::read(root.path().join(path)).expect("restored snapshot"),
@@ -1754,7 +1801,7 @@ mod tests {
     fn refuses_an_unrecognized_mount_even_with_a_matching_recorded_hash() {
         let (root, storage, pak, layout) = setup_fixture();
         let release = release(&pak, "v3.7.1-id.1");
-        install(&storage, &layout, &release, &pak, &no_progress).expect("fixture install");
+        install(&storage, &layout, &release, &pak, None, &no_progress).expect("fixture install");
         let owner_path = root.path().join(target_path(&layout.version, Slot::Owner));
         let mount_path = root.path().join(target_path(&layout.version, Slot::Mount));
         let mut owner: Owner =
@@ -1771,7 +1818,7 @@ mod tests {
         )
         .expect("changed metadata");
         let before_owner = fs::read(&owner_path).expect("owner snapshot");
-        assert!(repair(&storage, &layout, &release, &pak, &no_progress).is_err());
+        assert!(repair(&storage, &layout, &release, &pak, None, &no_progress).is_err());
         assert!(uninstall(&storage, &layout, &no_progress).is_err());
         assert_eq!(
             fs::read(&owner_path).expect("preserved metadata"),
@@ -1823,7 +1870,8 @@ mod tests {
     fn installs_repairs_and_uninstalls_only_the_owned_patch_set() {
         let (root, storage, pak, layout) = setup_fixture();
         let release = release(&pak, "v3.7.1-id.1");
-        let installed = install(&storage, &layout, &release, &pak, &no_progress).expect("install");
+        let installed =
+            install(&storage, &layout, &release, &pak, None, &no_progress).expect("install");
         assert!(installed.installed && installed.healthy && !installed.recovery_pending);
         let mount_path = format!("3.7.0/Mount/{MOUNT_FILENAME}");
         assert_mount_resolves(root.path(), &storage, &layout, &pak);
@@ -1837,7 +1885,8 @@ mod tests {
                 .expect("inspect damaged install")
                 .healthy
         );
-        let repaired = repair(&storage, &layout, &release, &pak, &no_progress).expect("repair");
+        let repaired =
+            repair(&storage, &layout, &release, &pak, None, &no_progress).expect("repair");
         assert!(repaired.healthy);
 
         let removed = uninstall(&storage, &layout, &no_progress).expect("uninstall");
@@ -1868,7 +1917,7 @@ mod tests {
             .write_text(&unowned, "another mod")
             .expect("unowned collision");
         let valid_release = release(&pak, "v3.7.1-id.1");
-        assert!(install(&storage, &layout, &valid_release, &pak, &no_progress).is_err());
+        assert!(install(&storage, &layout, &valid_release, &pak, None, &no_progress).is_err());
         assert_eq!(
             storage.read_text(&unowned).expect("preserved collision"),
             "another mod"
@@ -1877,7 +1926,7 @@ mod tests {
         storage.remove(&unowned).expect("clear fixture collision");
         let mut bad_release = valid_release;
         bad_release.sha256 = "00".repeat(32);
-        assert!(install(&storage, &layout, &bad_release, &pak, &no_progress).is_err());
+        assert!(install(&storage, &layout, &bad_release, &pak, None, &no_progress).is_err());
         assert!(
             !storage
                 .stat(&unowned)
@@ -1902,8 +1951,8 @@ mod tests {
             .as_deref()
             .unwrap_or_default()
             .contains("other-mod.txt"));
-        let error =
-            install(&storage, &layout, &release, &pak, &no_progress).expect_err("mount conflict");
+        let error = install(&storage, &layout, &release, &pak, None, &no_progress)
+            .expect_err("mount conflict");
         assert!(error.contains("other-mod.txt"));
         assert!(
             !storage
@@ -1927,7 +1976,7 @@ mod tests {
         )
         .expect("game language mount");
         let release = release(&pak, "v3.7.1-id.1");
-        let status = install(&storage, &layout, &release, &pak, &no_progress)
+        let status = install(&storage, &layout, &release, &pak, None, &no_progress)
             .expect("install beside game mounts");
         assert!(status.healthy);
     }
@@ -1990,6 +2039,7 @@ mod tests {
             &layout,
             &first_release,
             &pak,
+            None,
             &no_progress,
         )
         .expect("initial install");
@@ -2013,6 +2063,7 @@ mod tests {
             &layout,
             &updated_release,
             &updated_pak,
+            None,
             &no_progress
         )
         .is_err());
@@ -2064,5 +2115,110 @@ mod tests {
                 .expect("journal cleared")
                 .exists
         );
+    }
+
+    #[test]
+    fn custom_uid_mount_repair_and_reset_preserve_original_release_and_game_files() {
+        let (root, storage, pak, layout) = setup_fixture();
+        uid::tests::write_valid_fixture(&pak);
+        let release = release(&pak, "v3.7.1-id.1");
+        let original = fs::read(&pak).unwrap();
+        let official = fs::read(root.path().join(&layout.signature)).unwrap();
+        install(&storage, &layout, &release, &pak, None, &no_progress).unwrap();
+        let applied = install(
+            &storage,
+            &layout,
+            &release,
+            &pak,
+            Some("Rover Indonesia"),
+            &no_progress,
+        )
+        .unwrap();
+        assert!(applied.healthy);
+        assert_eq!(applied.custom_uid.as_deref(), Some("Rover Indonesia"));
+        let owner = load_owner(&storage, &layout.version).unwrap().unwrap();
+        assert_eq!(
+            owner.source_sha256.as_deref(),
+            Some(release.sha256.as_str())
+        );
+        assert_ne!(owner.pak_sha256, release.sha256);
+        let target = target_path(&layout.version, Slot::Pak);
+        assert_eq!(owner.pak_sha256, storage.hash(&target, "sha256").unwrap());
+        let mount = storage
+            .read_text(&target_path(&layout.version, Slot::Mount))
+            .unwrap();
+        assert_eq!(
+            mount,
+            mount_content(
+                &storage.hash(&target, "sha1").unwrap().to_ascii_uppercase(),
+                &storage
+                    .hash(&layout.signature, "sha1")
+                    .unwrap()
+                    .to_ascii_uppercase(),
+            )
+        );
+        storage.remove(&target).unwrap();
+        let repaired = repair(
+            &storage,
+            &layout,
+            &release,
+            &pak,
+            applied.custom_uid.as_deref(),
+            &no_progress,
+        )
+        .unwrap();
+        assert!(repaired.healthy);
+        assert_eq!(repaired.custom_uid.as_deref(), Some("Rover Indonesia"));
+        let reset = install(&storage, &layout, &release, &pak, None, &no_progress).unwrap();
+        assert!(reset.healthy);
+        assert_eq!(reset.custom_uid, None);
+        assert_eq!(storage.hash(&target, "sha256").unwrap(), release.sha256);
+        assert_eq!(fs::read(&pak).unwrap(), original);
+        assert_eq!(
+            fs::read(root.path().join(&layout.signature)).unwrap(),
+            official
+        );
+    }
+
+    #[test]
+    fn failed_uid_change_rolls_back_the_previous_uid_and_all_owned_artifacts() {
+        let (root, storage, pak, layout) = setup_fixture();
+        uid::tests::write_valid_fixture(&pak);
+        let storage = Arc::new(storage);
+        let release = release(&pak, "v3.7.1-id.1");
+        install(
+            storage.as_ref(),
+            &layout,
+            &release,
+            &pak,
+            Some("Rover Indonesia"),
+            &no_progress,
+        )
+        .unwrap();
+        let paths = target_paths(&layout.version);
+        let previous: Vec<_> = paths
+            .iter()
+            .map(|path| fs::read(root.path().join(path)).unwrap())
+            .collect();
+        let failing = FailMoveStorage {
+            inner: Arc::clone(&storage),
+            fail_target: target_path(&layout.version, Slot::Mount),
+            failures_remaining: Arc::new(Mutex::new(1)),
+        };
+        assert!(install(
+            &failing,
+            &layout,
+            &release,
+            &pak,
+            Some("Rover Nusantara"),
+            &no_progress
+        )
+        .is_err());
+        let restored = inspect(storage.as_ref(), &layout).unwrap();
+        assert!(restored.healthy && !restored.recovery_pending);
+        assert_eq!(restored.custom_uid.as_deref(), Some("Rover Indonesia"));
+        for (path, bytes) in paths.iter().zip(previous) {
+            assert_eq!(fs::read(root.path().join(path)).unwrap(), bytes);
+        }
     }
 }

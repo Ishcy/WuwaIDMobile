@@ -12,8 +12,8 @@ referensi. Tiga layar:
 
 - **Beranda:** status game, Shizuku, resource, dan rilis; unduh/pasang ulang
   terjemahan dengan progres dan pemeriksaan kompatibilitas.
-- **Kustomisasi:** pratinjau custom UID melalui mock IPC di browser. Fitur ini
-  tidak diterapkan ke game oleh backend native; UID akun tidak berubah.
+- **Kustomisasi:** UID kustom native di Android dan pratinjau mock di browser,
+  dengan penerapan dan Reset. Hanya teks tampilan yang berubah, bukan UID akun.
 - **Perawatan:** pemeriksaan ulang, pemulihan transaksi, ekspor diagnostik JSON,
   dan penghapusan berkas milik aplikasi dengan konfirmasi.
 - Navigasi horizontal di desktop dan dock bawah pada layar Android.
@@ -33,8 +33,9 @@ referensi. Tiga layar:
 Layout dan navigasi ketiga layar diverifikasi di browser pada lebar 320, 390, 768,
 1024, dan 1440 px tanpa overflow horizontal. Smoke browser mencakup delapan
 skenario perangkat, pemasangan/progres, penerapan UID, pembatalan/konfirmasi
-penghapusan, serta persistensi dan perubahan tema sistem. Verifikasi redesign ini
-belum dilakukan pada APK/WebView Android.
+penghapusan, serta persistensi dan perubahan tema sistem. Smoke APK Android
+mencakup Beranda dan penerapan/Reset UID native; belum mencakup seluruh skenario
+browser atau layar Perawatan.
 
 ### Android: pemasangan native
 
@@ -43,7 +44,8 @@ Aplikasi mengambil rilis stabil terbaru secara dinamis dari
 Tag, nama aset, ukuran, dan SHA-256 bukan nilai yang dibundel ke aplikasi.
 Unduhan memakai HTTPS, streaming ke cache privat aplikasi, serta pemeriksaan
 ukuran dan SHA-256 sebelum digunakan. Cache yang dipakai ulang juga diverifikasi.
-PAK diperlakukan sebagai berkas opaque: tidak diekstrak atau didecompile.
+Pemasangan standar menyalin PAK utuh. UID kustom mengubah database teks dalam
+salinan privat lalu mengemas ulang PAK; berkas sumber rilis tetap utuh.
 
 1. Pasang **Wuthering Waves Global** (`com.kurogame.wutheringwaves.global`).
 2. Buka game dan selesaikan unduhan resource, termasuk paket bahasa Inggris.
@@ -105,7 +107,52 @@ signature bahasa Inggris aktif, dan PAK rilis). Build APK debug ARM64 dan
 signature APK terverifikasi. Game kemudian berhasil mencapai layar masuk/pilih
 server; teks **Keluar**, **Akun**, **Pengaturan**, dan **Ketuk untuk mendarat di
 Solaris-3** tampil dalam Bahasa Indonesia tanpa dialog error pada layar tersebut.
-**Batas verifikasi:** belum masuk ke gameplay atau memeriksa seluruh konten terjemahan.
+Pengujian gameplay untuk UID kustom dijelaskan di bawah; belum memeriksa seluruh
+konten terjemahan.
+
+### Android: UID kustom
+
+**Kustomisasi → Terapkan** memerlukan terjemahan terpasang dan sehat. Input
+teks/angka maksimal 32 unit UTF-16 (sama dengan batas input browser), tanpa
+karakter kontrol atau pemisah baris. Spasi awal/akhir dipangkas; input kosong
+ditolak, bukan digunakan untuk menyembunyikan UID.
+
+Mengadaptasi algoritme
+[`WuwaIDLauncher`](https://github.com/TitoTFP/WuwaIDLauncher/blob/676c4a9b3b3f14ccb570d90252dc8972dbac8d13/src-tauri/src/engine/patch_asset.rs):
+backend membuka `Client/Content/Aki/ConfigDB/en/lang_multi_text.db` dalam PAK
+rilis terverifikasi, lalu mengubah kolom `MultiText.Content` untuk
+`Text_FriendMyUid_Text`, `Text_UserId_Text`, dan `PrefabTextItem_1341587207_Text`.
+Setiap target wajib tepat satu baris. Transaksi SQLite, pembacaan ulang teks,
+dan pemeriksaan integritas harus berhasil sebelum pengemasan ulang PAK v12.
+Mount point, daftar entry, dan isi setiap entry hasil repack diverifikasi;
+entry lain tetap identik.
+
+SHA-256 sumber tetap dibandingkan dengan metadata GitHub. PAK turunan memiliki
+SHA-256/ukuran sendiri, dan `SHA1_PAK` descriptor berasal dari PAK yang benar-benar
+dipasang. Teks pilihan dan checksum sumber disimpan bersama metadata kepemilikan
+dalam transaksi yang sama, sehingga rollback mengembalikan pilihan sebelumnya.
+Pasang ulang/perbaikan memakai kembali pilihan UID yang terpasang.
+**Reset** memasang kembali PAK rilis asli; **Hapus** menghapus pilihan beserta
+berkas milik aplikasi. Pemulihan transaksi tidak memerlukan repack atau jaringan.
+
+Aplikasi tidak membaca nomor UID akun. Android menampilkan **UID asli game**
+sebagai label bawaan; nomor contoh hanya dipakai oleh mock browser.
+SQLite dan pengolahan PAK berjalan di cache privat Rust; bridge Shizuku tidak
+diubah dan tetap hanya menulis berkas WuwaID yang dijaga oleh aturan kepemilikan.
+
+**Verifikasi perangkat (2026-10-03):** APK debug ARM64 dipasang pada SM-A525F
+tanpa menghapus data aplikasi, menggunakan rilis `v3.7.1-id.1`.
+**Terapkan** menampilkan persis `Rover Indonesia` pada HUD gameplay Android;
+pilihan tetap tersimpan setelah aplikasi dibuka kembali. **Reset** mengembalikan
+label dan nomor UID semula pada HUD yang sama. SHA-256 PAK yang terpasang setelah
+Reset identik dengan PAK sumber rilis terverifikasi.
+
+Seluruh **443 berkas resource resmi** pada `Resources/3.7.0` memiliki SHA-256
+identik sebelum dan sesudah skenario; tidak ada berkas resmi ditambah atau hilang.
+Artefak WuwaID yang dimiliki aplikasi dikecualikan dari baseline tersebut.
+`npm run build` dan 20 tes Rust (`--locked --all-targets`) berhasil.
+**Batas verifikasi:** panel teman/profil tidak diuji terpisah; pengujian ini tidak
+memverifikasi seluruh konten terjemahan.
 
 ### Browser dan desktop
 
@@ -119,7 +166,7 @@ siap, terpasang, game tidak ditemukan, versi tidak didukung, resource belum siap
 Shizuku mati, izin belum diberikan, dan pemulihan tertunda. Semua tindakan browser
 tetap simulasi; tidak ada penulisan ke game atau peluncuran game.
 
-Custom UID menerima teks/angka maksimal 32 karakter dengan pratinjau langsung.
+Custom UID menerima teks/angka maksimal 32 unit UTF-16 dengan pratinjau langsung.
 UID bawaan `900123456`, versi game `3.7.0`, dan konten `3.7.0-R2` adalah data
 contoh mock, bukan nilai perangkat. Penerapan/pemulihan UID memerlukan patch sehat;
 uninstall mereset tampilannya. Font game tetap bawaan.
@@ -134,12 +181,12 @@ data contoh dan custom UID. Ekspor diagnostik membedakan `mock: true` dan
 |---|---|---|
 | `wuwa_load` | — | `Dashboard` |
 | `wuwa_set_scenario` | `scenario` | `Dashboard` (browser saja) |
-| `wuwa_run` | `operation`, `uidText?` (UID mock saja) | `Dashboard` |
+| `wuwa_run` | `operation`, `uidText?` (`apply_uid`) | `Dashboard` |
 | `wuwa_open_setup` | `target`: `game` / `shizuku` | — (native) |
 | `wuwa_diagnostics` | — | `Diagnostics` (`filename`, `content`) |
 
 Operasi native: `install`, `repair`, `uninstall`, `request_permission`,
-`launch_game`. `apply_uid` dan `restore_uid` hanya tersedia dalam mock.
+`launch_game`, `apply_uid`, dan `restore_uid`.
 Operasi mutasi bersamaan ditolak. Kontrak state berada di `src/model.ts`;
 installer/downloader berada di `src-tauri/src/pak/`, orkestrasi di
 `src-tauri/src/native.rs`, dan bridge di `src-tauri/src/android.rs`.

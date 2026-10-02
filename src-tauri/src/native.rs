@@ -14,7 +14,7 @@ use crate::pak::model::{InstallStatus, PakResult, Release, GAME_PACKAGE};
 use crate::pak::{
     installer,
     model::{DeviceProbe, ResourceLayout},
-    release,
+    release, uid,
 };
 
 #[derive(Default)]
@@ -96,6 +96,7 @@ fn empty_status() -> InstallStatus {
         recovery_pending: false,
         version: String::new(),
         message: None,
+        custom_uid: None,
     }
 }
 fn current_release(app: &AppHandle) -> PakResult<Option<Release>> {
@@ -221,13 +222,14 @@ fn load_dashboard(app: &AppHandle, refresh_release: bool) -> PakResult<Dashboard
                 Err(error) => blocker = Some(error),
             }
         }
+        let custom_uid = patch.custom_uid.take();
         Ok(Dashboard {
             mode: "native",
             platform_supported: true,
             storage_writable: probe.root_writable,
             blocker,
             release: selected_release,
-            uid_available: false,
+            uid_available: true,
             game: Game {
                 installed: probe.game_installed,
                 version: probe.game_version,
@@ -241,7 +243,7 @@ fn load_dashboard(app: &AppHandle, refresh_release: bool) -> PakResult<Dashboard
             patch,
             uid: Uid {
                 original: "",
-                custom: None,
+                custom: custom_uid,
             },
             last_checked: timestamp(),
         })
@@ -256,13 +258,17 @@ pub async fn wuwa_load(app: AppHandle) -> PakResult<Dashboard> {
 }
 
 #[tauri::command]
-pub async fn wuwa_run(app: AppHandle, operation: String) -> PakResult<Dashboard> {
+pub async fn wuwa_run(
+    app: AppHandle,
+    operation: String,
+    uid_text: Option<String>,
+) -> PakResult<Dashboard> {
     let guard = BusyGuard::acquire(Arc::clone(app.state::<Arc<NativeState>>().inner()))?;
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = guard;
         #[cfg(not(target_os = "android"))]
         {
-            let _ = (&app, operation);
+            let _ = (&app, operation, uid_text);
             Err("Pemasangan nyata memerlukan Android dan Shizuku.".into())
         }
         #[cfg(target_os = "android")]
@@ -270,18 +276,37 @@ pub async fn wuwa_run(app: AppHandle, operation: String) -> PakResult<Dashboard>
             let storage = bridge(&app);
             match operation.as_str() {
                 "request_permission" | "launch_game" => storage.control(&operation)?,
-                "install" | "repair" | "uninstall" => {
+                "install" | "repair" | "uninstall" | "apply_uid" | "restore_uid" => {
                     let probe = storage.probe()?;
                     physical_prerequisites(&probe)?;
                     let layout = installer::discover(&*storage)?;
+                    let status = installer::inspect(&*storage, &layout)?;
+                    let custom_uid = match operation.as_str() {
+                        "apply_uid" | "restore_uid" => {
+                            if !status.installed || !status.healthy || status.recovery_pending {
+                                return Err(
+                                    "UID kustom memerlukan terjemahan terpasang dan sehat.".into(),
+                                );
+                            }
+                            if operation == "apply_uid" {
+                                Some(
+                                    uid::validate_text(
+                                        uid_text.as_deref().ok_or("Masukkan teks UID kustom.")?,
+                                    )?
+                                    .to_owned(),
+                                )
+                            } else {
+                                None
+                            }
+                        }
+                        _ => status.custom_uid,
+                    };
                     let progress = |value| {
                         let _ = app.emit("wuwa-progress", value);
                     };
                     if operation == "uninstall" {
                         installer::uninstall(&*storage, &layout, &progress)?;
-                    } else if operation == "repair"
-                        && installer::inspect(&*storage, &layout)?.recovery_pending
-                    {
+                    } else if operation == "repair" && status.recovery_pending {
                         installer::recover(&*storage, &layout, &progress)?;
                     } else {
                         let release = fetch_release(&app)?;
@@ -293,16 +318,26 @@ pub async fn wuwa_run(app: AppHandle, operation: String) -> PakResult<Dashboard>
                             .join("release-paks");
                         let pak = release::download(&release, &cache, &progress)?;
                         if operation == "repair" {
-                            installer::repair(&*storage, &layout, &release, &pak, &progress)?;
+                            installer::repair(
+                                &*storage,
+                                &layout,
+                                &release,
+                                &pak,
+                                custom_uid.as_deref(),
+                                &progress,
+                            )?;
                         } else {
-                            installer::install(&*storage, &layout, &release, &pak, &progress)?;
+                            installer::install(
+                                &*storage,
+                                &layout,
+                                &release,
+                                &pak,
+                                custom_uid.as_deref(),
+                                &progress,
+                            )?;
                         }
                     }
                 }
-                "apply_uid" | "restore_uid" => return Err(
-                    "Custom UID masih merupakan pratinjau browser, bukan modifikasi game nyata."
-                        .into(),
-                ),
                 _ => return Err("Operasi tidak dikenal.".into()),
             }
             load_dashboard(&app, false)

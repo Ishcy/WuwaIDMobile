@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Implement native Android custom UID and Reset using verified release PAKs,
+  SQLite updates to the three launcher UID targets, and verified PAK v12 repacking.
+  Preserve other translations, original release integrity, and official game files.
+- Track source/derived hashes and UID selection in transactional ownership metadata;
+  retain selections on repair/reinstall and restore previous selections on rollback.
+  Reuse the existing Shizuku bridge without changing account/server UID.
+- Enable the native UID editor and keep browser/native validation aligned with
+  the 32-unit UTF-16 input limit; reject blank and control-character input.
+- Verify native Apply and Reset in Android gameplay on SM-A525F: exact
+  `Rover Indonesia` HUD text, restored original UID/release PAK, and identical
+  SHA-256 checksums for all 443 baseline official resource files.
+
 - Add restrained 140–180 ms navigation, control, theme, disclosure, dialog,
   and toast transitions; interpolate accessible progress without layout reflow.
   Honor live reduced-motion preferences and avoid replaying page entrances on

@@ -61,6 +61,9 @@ pub struct InstallStatus {
     pub recovery_pending: bool,
     pub version: String,
     pub message: Option<String>,
+    // The dashboard exposes this metadata in uid.custom, not patch.
+    #[serde(skip)]
+    pub custom_uid: Option<String>,
 }
 
 #[derive(Clone, Debug)]

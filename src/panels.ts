@@ -31,12 +31,13 @@ function button(
 export function renderCustomize(state: UiState): string {
   const d = state.dashboard;
   if (!d.uidAvailable)
-    return `<section class="page-heading"><h1>Kustomisasi</h1></section><section class="card unavailable-studio"><h2>Belum tersedia</h2><p class="muted">UID kustom hanya tersedia di simulasi browser.</p><button class="text-button" data-section="home">Beranda ${icon("arrow")}</button></section>`;
+    return `<section class="page-heading"><h1>Kustomisasi</h1></section><section class="card unavailable-studio"><h2>Memerlukan Android</h2><p class="muted">UID kustom memerlukan Android dan Shizuku.</p><button class="text-button" data-section="home">Beranda ${icon("arrow")}</button></section>`;
   const status = readiness(d);
   const canCustomize =
     !state.busy && d.patch.installed && d.patch.healthy && status.ready;
   const draft = state.uidDraft.trim();
-  const current = d.uid.custom ?? d.uid.original;
+  const original = d.uid.original || "UID asli game";
+  const current = d.uid.custom ?? original;
   const canApply =
     canCustomize &&
     draft.length > 0 &&
@@ -48,7 +49,7 @@ export function renderCustomize(state: UiState): string {
       ? "Pasang terjemahan terlebih dahulu."
       : "";
 
-  return `<section class="page-heading"><h1>Kustomisasi</h1><p>Simulasi tampilan UID. UID akun tetap.</p></section>
+  return `<section class="page-heading"><h1>Kustomisasi</h1><p>${d.mode === "mock" ? "Simulasi tampilan UID." : "Tampilan UID."} UID akun tetap.</p></section>
     <div class="uid-grid">
       <section class="card uid-editor" aria-labelledby="uid-title">
         <div class="card-header"><h2 id="uid-title">UID kustom</h2>${icon("customize")}</div>
@@ -60,13 +61,13 @@ export function renderCustomize(state: UiState): string {
           <div class="actions"><button class="btn btn-primary" id="apply-uid" type="submit" ${canApply ? "" : "disabled"}>${icon("check")} Terapkan</button>${button("restore-uid", `${icon("refresh")} Reset`, !canCustomize || d.uid.custom === null)}</div>
         </form>
         <dl class="info-list uid-info">
-          <div class="info-row"><dt>Bawaan</dt><dd>${escapeHtml(d.uid.original)}</dd></div>
+          <div class="info-row"><dt>Bawaan</dt><dd>${escapeHtml(original)}</dd></div>
           <div class="info-row"><dt>Aktif</dt><dd id="uid-active">${escapeHtml(current)}</dd></div>
         </dl>
       </section>
       <section class="uid-preview-card" aria-labelledby="uid-preview-title">
         <div class="preview-heading"><h2 id="uid-preview-title">Pratinjau</h2></div>
-        <div class="uid-preview-stage"><span class="uid-preview-label">UID</span><output id="uid-preview" for="uid-input">${escapeHtml(draft || d.uid.original)}</output></div>
+        <div class="uid-preview-stage"><span class="uid-preview-label">UID</span><output id="uid-preview" for="uid-input">${escapeHtml(draft || original)}</output></div>
       </section>
     </div>`;
 }

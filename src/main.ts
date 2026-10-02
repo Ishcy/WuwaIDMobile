@@ -334,7 +334,7 @@ app.addEventListener("input", (event) => {
   const draft = state.uidDraft.trim();
   const d = state.dashboard;
   app.querySelector<HTMLOutputElement>("#uid-preview")!.textContent =
-    draft || d.uid.original;
+    draft || d.uid.original || "UID asli game";
   app.querySelector<HTMLElement>("#uid-count")!.textContent =
     `${state.uidDraft.length}/${UID_MAX_LENGTH}`;
   app.querySelector<HTMLButtonElement>("#apply-uid")!.disabled =
