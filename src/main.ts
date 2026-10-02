@@ -19,33 +19,40 @@ let state: UiState;
 let section: Section = "home";
 let error = "";
 let toastTimer: number;
-const navigation: {
-  id: Section;
-  label: string;
-  subtitle: string;
-  number: string;
-}[] = [
-  {
-    id: "home",
-    label: "Beranda",
-    subtitle: "Terjemahan & perangkat",
-    number: "01",
-  },
-  {
-    id: "customize",
-    label: "Kustomisasi",
-    subtitle: "Custom UID & tampilan",
-    number: "02",
-  },
-  {
-    id: "tools",
-    label: "Perawatan",
-    subtitle: "Pemeriksaan & pemulihan",
-    number: "03",
-  },
+const navigation: { id: Section; label: string; number: string }[] = [
+  { id: "home", label: "Beranda", number: "01" },
+  { id: "customize", label: "Kustomisasi", number: "02" },
+  { id: "tools", label: "Perawatan", number: "03" },
 ];
-const logo =
-  '<svg viewBox="0 0 40 40" fill="none" aria-hidden="true"><path d="M6 11 13 29l7-17 7 17 7-18M6 20l7 9m14 0 7-9" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const logo = '<svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M3 16c5-17 9 17 14 0s9 17 12 0M3 23c5-17 9 17 14 0s9 17 12 0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+type ThemePreference = "light" | "dark" | "system";
+const systemTheme = matchMedia("(prefers-color-scheme: dark)");
+let themePreference = document.documentElement.dataset.themePreference as ThemePreference;
+const themeOptions: { id: ThemePreference; label: string; icon: string }[] = [
+  { id: "light", label: "Terang", icon: "sun" },
+  { id: "dark", label: "Gelap", icon: "moon" },
+  { id: "system", label: "Sistem", icon: "system" },
+];
+
+function applyTheme() {
+  const theme = themePreference === "system"
+    ? (systemTheme.matches ? "dark" : "light")
+    : themePreference;
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.dataset.themePreference = themePreference;
+  document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')!.content =
+    theme === "dark" ? "#15151b" : "#f5f3ef";
+  app.querySelectorAll<HTMLButtonElement>("[data-theme-choice]").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.themeChoice === themePreference));
+  });
+}
+systemTheme.addEventListener("change", () => {
+  if (themePreference === "system") applyTheme();
+});
+
+function renderThemeControl() {
+  return `<div class="theme-control" role="group" aria-label="Tema tampilan">${themeOptions.map((option) => `<button type="button" data-theme-choice="${option.id}" aria-label="Tema ${option.label.toLowerCase()}" title="${option.label}" aria-pressed="${themePreference === option.id}">${icon(option.icon)}</button>`).join("")}</div>`;
+}
 
 function notify(message: string) {
   clearTimeout(toastTimer);
@@ -133,39 +140,64 @@ function renderHome() {
       : d.release
         ? `${d.release.gameVersion.split(".").slice(0, 2).join(".")}.*`
         : "—";
-  return `<div class="page-heading"><div><p class="eyebrow">SELAMAT DATANG, ROVER</p><h1>Dunia yang sama.<br><span>Cerita dalam bahasa kita.</span></h1><p>Jelajahi Solaris-3 dengan Bahasa Indonesia.</p></div><span class="edition-label">LOKALISASI INDONESIA<br><strong>WUWA / ID</strong></span></div>
-    <section class="hero" aria-labelledby="hero-title">
-      <div class="hero-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="orbit orbit-three"></div><div class="art-core"></div><span class="art-coordinate">SOLARIS–3 / 06:42</span><span class="art-label">RESONANCE<br>WITHOUT BORDERS.</span></div>
-      <div class="hero-content"><span class="hero-kicker"><span class="tiny-dot"></span> BAHASA INDONESIA</span><h2 id="hero-title">Lebih dekat<br>dengan setiap cerita.</h2><p>Dialog, misi, dan dunia Wuthering Waves.<br>Dalam bahasa yang terasa seperti rumah.</p><div class="hero-meta"><span>${icon("game")} Wuthering Waves Global</span><span>PATCH ${esc(contentVersion)}</span></div></div>
+  return `<section class="resonance-hero" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <p class="eyebrow"><span class="tiny-dot"></span> WUTHERING WAVES, DALAM BAHASA KITA</p>
+        <h1 id="hero-title">Pahami ceritanya.<br><em>Rasakan dunianya.</em></h1>
+        <p class="hero-description">Jarak boleh jauh. Cerita tetap dekat.<br>Bawa Bahasa Indonesia ke petualanganmu di Solaris-3.</p>
+        <div class="hero-actions"><button class="btn btn-primary" data-action="${primary.action}" ${disabled}>${icon(d.patch.installed ? "external" : "download")} ${primary.label} ${icon("arrow")}</button><button class="text-button" data-section="tools">Cek perangkat ${icon("arrow")}</button></div>
+        <div class="hero-status"><span class="status-dot ${ready.ready ? "good" : "warning"}"></span><span>${esc(ready.label)}</span><span class="hero-status-divider">/</span><span>${d.mode === "mock" ? "Pratinjau browser" : "Pemasangan native"}</span></div>
+      </div>
+      <div class="resonance-art" aria-hidden="true">
+        <span class="art-caption">FREKUENSI YANG SAMA.<br>BAHASA YANG BERBEDA.</span>
+        <svg class="resonance-sculpture" viewBox="0 0 520 440" fill="none">
+          <defs><linearGradient id="wave-ink" x1="100" y1="0" x2="430" y2="440" gradientUnits="userSpaceOnUse"><stop stop-color="currentColor"/><stop offset="1" stop-color="currentColor" stop-opacity=".12"/></linearGradient></defs>
+          <g stroke="url(#wave-ink)" stroke-width="1.2">
+            ${Array.from({ length: 30 }, (_, i) => `<ellipse cx="260" cy="223" rx="${76 + i * 3.9}" ry="${147 - i * 2.3}" transform="rotate(${i * 3 - 43} 260 223)"/>`).join("")}
+          </g><path d="M52 224h416M260 32v382" stroke="currentColor" stroke-opacity=".14" stroke-dasharray="3 7"/><circle cx="260" cy="223" r="5" fill="currentColor"/><circle cx="450" cy="224" r="3" fill="currentColor"/>
+        </svg>
+        <div class="art-footer"><span>RESONANSI / 001</span><span>EN <span class="art-arrow">↗</span> ID</span></div>
+      </div>
     </section>
-    <div class="home-grid"><section class="card translation-card" aria-labelledby="translation-title"><div class="card-header"><div><p class="eyebrow">PAKET TERJEMAHAN</p><h2 id="translation-title">Bahasa Indonesia</h2></div><span class="language-mark">ID<span>EN → ID</span></span></div>
-      <p class="muted">Cerita diterjemahkan. Nama karakter, senjata, dan lokasi tetap menggunakan nama Inggris.</p>
-      <div class="package-facts"><div><span>Versi konten</span><strong>${esc(contentVersion)}</strong></div><div><span>Kompatibilitas</span><strong>Game ${esc(gameLine)}</strong></div><div><span>Nama dalam game</span><strong>Nama Inggris</strong></div>${d.patch.installed ? `<div><span>Terpasang</span><strong>${esc(d.patch.version)}</strong></div>` : ""}</div>
-      ${d.release ? `<details class="release-details"><summary>Detail rilis GitHub · ${(d.release.size / 1048576).toFixed(1)} MB</summary><p>${esc(d.release.assetName)}</p><p>SHA-256: <code>${esc(d.release.sha256)}</code></p><a href="https://github.com/TitoTFP/WuwaID/releases/latest" target="_blank" rel="noopener noreferrer">TitoTFP/WuwaID · rilis latest</a></details>` : ""}
-      <div class="package-state"><span class="status-dot ${ready.ready ? "good" : "warning"}"></span><div><strong>${esc(ready.label)}</strong><p>${esc(ready.detail)}</p></div></div>
-      <button class="btn btn-primary btn-wide" data-action="${primary.action}" ${disabled}>${icon(d.patch.installed ? "external" : "download")} ${primary.label} ${icon("arrow", "end-icon")}</button>
-      ${d.patch.installed && ready.ready ? `<button class="text-button" data-action="install" ${disabled}>Pasang ulang terjemahan ${icon("refresh")}</button>` : ""}
-      <p class="safety-note">${icon("shield")} ${d.mode === "mock" ? "Simulasi pemasangan · file game asli tidak diubah" : "SHA-256 diperiksa sebelum pemasangan · PAK asli tidak ditimpa"}</p>
-    </section>
-    <section class="card device-card" aria-labelledby="device-title"><div class="card-header"><div><p class="eyebrow">PEMERIKSAAN SISTEM</p><h2 id="device-title">Perangkatmu</h2></div><button class="icon-btn" data-action="refresh" aria-label="Periksa ulang perangkat" ${state.busy ? "disabled" : ""}>${icon("refresh")}</button></div>
-      <div class="device-list">${deviceRows.map((row) => `<div class="device-row"><span class="device-icon">${icon(row.icon)}</span><div><strong>${row.name}</strong><p>${esc(row.value)}</p></div><span class="device-check ${row.ok ? "" : "pending"}" aria-label="${row.ok ? "Siap" : "Perlu perhatian"}">${row.ok ? icon("check") : "!"}</span></div>`).join("")}</div>
-      <div class="device-note">${icon("info")} <p>${d.mode === "mock" ? "Data perangkat berasal dari mock IPC, bukan hasil pemindaian perangkat asli." : d.platformSupported ? "Status dibaca melalui bridge Android/Shizuku. Tutup game sebelum pemasangan; aplikasi akan menghentikan game saat commit." : "Desktop tidak menyediakan akses resource Android. Gunakan aplikasi Android untuk pemasangan nyata."}</p></div><div class="checked-time">Terakhir diperiksa <span>${new Date(d.lastChecked).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}</span></div>
-    </section></div>
-    <section class="bottom-note"><span class="note-number">01 /</span><div><h3>Terjemahan dulu, petualangan kemudian.</h3><p>Pasang paket, sesuaikan tampilan UID, lalu kembali ke dunia Wuthering Waves.</p></div><button class="text-button" data-section="customize">Custom UID ${icon("arrow")}</button></section>`;
+    <div class="section-heading"><div><span class="eyebrow">RUANG KENDALI</span><h2>Siap untuk cerita berikutnya.</h2></div><span class="section-index">01 — 03</span></div>
+    <div class="home-grid">
+      <section class="card translation-card" aria-labelledby="translation-title">
+        <div class="card-header"><div><p class="eyebrow">01 / PAKET BAHASA</p><h2 id="translation-title">Bahasa Indonesia</h2></div><span class="language-mark">Aa<span>EN → ID</span></span></div>
+        <p class="muted">Dialog dan misi dalam bahasa kita. Nama karakter, senjata, dan lokasi tetap dalam bahasa Inggris.</p>
+        <div class="package-facts"><div><span>Rilis terbaru</span><strong>${esc(contentVersion)}</strong></div><div><span>Untuk game</span><strong>${esc(gameLine)}</strong></div>${d.patch.installed ? `<div><span>Terpasang</span><strong>${esc(d.patch.version)}</strong></div>` : ""}</div>
+        <div class="package-state"><span class="status-dot ${ready.ready ? "good" : "warning"}"></span><div><strong>${esc(ready.label)}</strong><p>${esc(ready.detail)}</p></div></div>
+        ${d.patch.installed && ready.ready ? `<button class="text-button" data-action="install" ${disabled}>Pasang ulang terjemahan ${icon("refresh")}</button>` : ""}
+        ${d.release ? `<details class="release-details"><summary>Detail paket · ${(d.release.size / 1048576).toFixed(1)} MB</summary><p>${esc(d.release.assetName)}</p><p>SHA-256: <code>${esc(d.release.sha256)}</code></p><a href="https://github.com/TitoTFP/WuwaID/releases/latest" target="_blank" rel="noopener noreferrer">Lihat rilis di GitHub ${icon("external")}</a></details>` : ""}
+        <p class="safety-note">${icon("shield")} ${d.mode === "mock" ? "Simulasi saja. File game tidak diubah." : "SHA-256 diverifikasi. PAK asli tidak ditimpa."}</p>
+      </section>
+      <section class="card device-card" aria-labelledby="device-title"><div class="card-header"><div><p class="eyebrow">02 / KESIAPAN PERANGKAT</p><h2 id="device-title">Sebelum berangkat</h2></div><button class="icon-btn" data-action="refresh" aria-label="Periksa ulang perangkat" ${state.busy ? "disabled" : ""}>${icon("refresh")}</button></div>
+        <div class="device-list">${deviceRows.map((row) => `<div class="device-row"><span class="device-icon">${icon(row.icon)}</span><div><strong>${row.name}</strong><p>${esc(row.value)}</p></div><span class="device-check ${row.ok ? "" : "pending"}" aria-label="${row.ok ? "Siap" : "Perlu perhatian"}">${row.ok ? icon("check") : icon("info")}</span></div>`).join("")}</div>
+        <div class="device-note">${icon("info")}<p>${d.mode === "mock" ? "Ini data contoh, bukan pemindaian perangkat. Pemasangan nyata tersedia di aplikasi Android." : d.platformSupported ? "Status dari Android/Shizuku. Game akan dihentikan sebelum penulisan paket." : "Desktop tidak mengakses resource Android. Gunakan aplikasi Android untuk pemasangan."}</p></div>
+        <div class="checked-time">Diperiksa <span>${new Date(d.lastChecked).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}</span></div>
+      </section>
+      <button class="studio-card" data-section="customize"><span class="eyebrow">03 / SENTUHAN PERSONAL</span><span class="studio-glyph" aria-hidden="true">R<span>↗</span></span><span class="studio-title">Identitasmu.<br>Gayamu.</span><span class="studio-description">Jelajahi pratinjau UID kustom.</span><span class="studio-link">Buka Kustomisasi ${icon("arrow")}</span></button>
+    </div>`;
 }
 
 function render() {
-  const ready = readiness(state.dashboard);
   const focused = document.activeElement as HTMLElement | null;
   const focusAction = focused?.dataset.action;
-  app.innerHTML = `<aside class="sidebar"><a class="brand" href="#home" aria-label="WuwaIDMobile Beranda"><span class="brand-symbol">${logo}</span><span>WUWA<span class="brand-id">ID</span><small>MOBILE COMPANION</small></span></a><div class="sidebar-label">RUANG ROVER</div><nav aria-label="Navigasi utama">${navigation.map((item) => `<button class="nav-item ${section === item.id ? "active" : ""}" data-section="${item.id}" ${section === item.id ? 'aria-current="page"' : ""}>${icon(item.id)}<span>${item.label}<small>${item.subtitle}</small></span><span class="nav-number">${item.number}</span></button>`).join("")}</nav><div class="sidebar-bottom"><div class="sidebar-decoration" aria-hidden="true">${logo}</div><p>Dibuat untuk cerita.<br><strong>Dibangun untuk kita.</strong></p><div class="sidebar-version"><span class="tiny-dot"></span> FRONTEND PREVIEW <span>v0.1.0</span></div></div></aside>
-    <div class="workspace"><header class="topbar"><span class="breadcrumb">Ruang Rover <span>/</span> <strong>${navigation.find((n) => n.id === section)!.label}</strong></span><div class="topbar-right"><span class="mock-badge">${icon("info")} ${state.dashboard.mode === "mock" ? "MODE SIMULASI" : "NATIVE · TAURI"}</span><span class="avatar" aria-label="Lokalisasi Indonesia">ID</span></div></header>
-    <main id="main-content"><div class="mobile-brand">${logo}<strong>WUWA<span>ID</span></strong><span class="badge ${ready.ready ? "badge-good" : "badge-warning"}">${ready.label}</span></div>
-    ${error ? `<div class="error-banner" role="alert">${icon("info")}<span>${esc(error)}</span><button class="icon-btn" data-action="dismiss-error" aria-label="Tutup pesan">${icon("close")}</button></div>` : ""}
-    ${state.busy ? `<div class="progress-card" role="status" aria-live="polite"><div><strong>${esc(state.progress?.label ?? (state.dashboard.mode === "mock" ? "Menyiapkan simulasi…" : "Menyiapkan operasi…"))}</strong><span>${state.progress?.percent ?? 0}%</span></div><progress max="100" value="${state.progress?.percent ?? 0}" aria-label="Progres pemasangan"></progress><p>${state.dashboard.mode === "mock" ? "Simulasi IPC · tidak ada file game yang ditulis" : "Unduhan terverifikasi · pemasangan melalui Shizuku"}</p></div>` : ""}
-    ${section === "home" ? renderHome() : section === "customize" ? renderCustomize(state) : renderTools(state)}
-    <footer class="footer"><span>WUWA<span class="footer-id">ID</span> <span class="footer-divider">/</span> Bahasanya kita. Petualangannya bersama.</span><span>Komunitas independen · tidak berafiliasi dengan Kuro Games</span></footer></main></div>
+  if (!app.querySelector(".app-header")) {
+    app.innerHTML = `<header class="app-header"><div class="header-inner"><a class="brand" href="#home" aria-label="WuwaIDMobile Beranda"><span class="brand-symbol">${logo}</span><span>wuwa<span class="brand-id">id</span><small>RUANG RESONANSI</small></span></a><nav class="desktop-nav" aria-label="Navigasi utama">${navigation.map((item) => `<button class="nav-item ${section === item.id ? "active" : ""}" data-section="${item.id}" ${section === item.id ? 'aria-current="page"' : ""}><span>${item.number}</span>${item.label}</button>`).join("")}</nav>${renderThemeControl()}</div></header>
+    <div class="workspace"><div class="context-bar"><span>LOKALISASI INDEPENDEN <span class="context-separator">/</span> INDONESIA</span><span class="mode-label"><span class="tiny-dot"></span>${state.dashboard.mode === "mock" ? "SIMULASI BROWSER" : "NATIVE · TAURI"}</span></div>
+    <main id="main-content" tabindex="-1"></main><footer class="footer"><div class="footer-brand">${logo}<span>Bahasanya kita.<br><strong>Petualangannya bersama.</strong></span></div><p>Proyek komunitas independen.<br>Tidak berafiliasi dengan Kuro Games.</p><span class="footer-coordinate">SOLARIS–3 ↗ ID</span></footer></div>
     <nav class="mobile-nav" aria-label="Navigasi seluler">${navigation.map((item) => `<button data-section="${item.id}" class="${section === item.id ? "active" : ""}" ${section === item.id ? 'aria-current="page"' : ""}>${icon(item.id)}<span>${item.label}</span></button>`).join("")}</nav>`;
+  }
+  app.querySelectorAll<HTMLButtonElement>(".desktop-nav [data-section], .mobile-nav [data-section]").forEach((button) => {
+    const active = button.dataset.section === section;
+    button.classList.toggle("active", active);
+    if (active) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
+  });
+  app.querySelector("#main-content")!.innerHTML = `
+    ${error ? `<div class="error-banner" role="alert">${icon("info")}<span>${esc(error)}</span><button class="icon-btn" data-action="dismiss-error" aria-label="Tutup pesan">${icon("close")}</button></div>` : ""}
+    ${state.busy ? `<div class="progress-card" role="status" aria-live="polite"><div><strong>${esc(state.progress?.label ?? "Menyiapkan operasi…")}</strong><span>${state.progress?.percent ?? 0}%</span></div><progress max="100" value="${state.progress?.percent ?? 0}" aria-label="Progres pemasangan"></progress><p>${state.dashboard.mode === "mock" ? "Simulasi IPC · tidak ada file game yang ditulis" : "Unduhan terverifikasi · pemasangan melalui Shizuku"}</p></div>` : ""}
+    ${section === "home" ? renderHome() : section === "customize" ? renderCustomize(state) : renderTools(state)}`;
   dialog.querySelector("p")!.textContent =
     state.dashboard.mode === "mock"
       ? "Simulasi ini menghapus paket terjemahan dan memulihkan tampilan UID bawaan. File game asli dan UID akun tidak diubah."
@@ -242,10 +274,22 @@ async function operate(operation: Operation, uidText?: string) {
 }
 
 app.addEventListener("click", async (event) => {
+  const themeButton = (event.target as Element).closest<HTMLButtonElement>("[data-theme-choice]");
+  if (themeButton) {
+    themePreference = themeButton.dataset.themeChoice as ThemePreference;
+    try {
+      localStorage.setItem("wuwaidmobile.theme", themePreference);
+    } catch {
+      notify("Tema berubah untuk sesi ini; penyimpanan preferensi tidak tersedia.");
+    }
+    applyTheme();
+    return;
+  }
   const button = (event.target as Element).closest<HTMLElement>(
     "[data-section], [data-action], .brand",
   );
   if (!button || button.hasAttribute("disabled")) return;
+  if (!state) return;
   if (button.dataset.section || button.classList.contains("brand")) {
     event.preventDefault();
     section = (button.dataset.section as Section) || "home";
@@ -263,7 +307,7 @@ app.addEventListener("click", async (event) => {
   } else if (action === "refresh")
     await execute(async () => {
       state.dashboard = await api.load();
-      notify("Status perangkat simulasi diperbarui.");
+      notify(state.dashboard.mode === "mock" ? "Status perangkat simulasi diperbarui." : "Status perangkat diperbarui.");
     });
   else if (action === "restore-uid") await operate("restore_uid");
   else if (action === "uninstall") dialog.showModal();
@@ -359,7 +403,13 @@ document
 api.subscribeProgress((progress) => {
   if (state?.busy) {
     state.progress = progress;
-    render();
+    // Progress must not replace navigation, theme controls, or focused inputs.
+    const card = app.querySelector<HTMLElement>(".progress-card");
+    if (card) {
+      card.querySelector("strong")!.textContent = progress.label;
+      card.querySelector("div > span")!.textContent = `${progress.percent}%`;
+      card.querySelector("progress")!.value = progress.percent;
+    }
   }
 });
 

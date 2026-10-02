@@ -31,7 +31,7 @@ function button(
 export function renderCustomize(state: UiState): string {
   const d = state.dashboard;
   if (!d.uidAvailable)
-    return `<section class="page-heading"><span class="eyebrow">Identitas di layar</span><h1>Custom UID</h1><p>Pratinjau kustomisasi tampilan UID.</p></section><section class="simulation-panel"><strong>Custom UID hanya tersedia di pratinjau browser</strong><p>Pemasangan PAK memakai backend native. Kustomisasi UID masih berupa simulasi browser; aplikasi tidak mengubah UID akun atau mengklaim sudah menerapkannya ke game.</p></section>`;
+    return `<section class="page-heading"><p class="eyebrow">02 / STUDIO TAMPILAN</p><h1>Sedikit lebih <em>kamu.</em></h1><p>Sentuhan personal untuk identitas di layar.</p></section><section class="card unavailable-studio"><div class="studio-glyph" aria-hidden="true">R<span>↗</span></div><div><span class="badge">Pratinjau browser saja</span><h2>Studio UID belum tersedia di Android</h2><p class="muted">Kustomisasi UID saat ini hanya simulasi browser. Backend native memasang paket terjemahan, bukan mengubah UID akun atau tampilan UID game.</p><button class="text-button" data-section="home">Kembali ke paket bahasa ${icon("arrow")}</button></div></section>`;
   const status = readiness(d);
   const canCustomize =
     !state.busy && d.patch.installed && d.patch.healthy && status.ready;
@@ -48,33 +48,34 @@ export function renderCustomize(state: UiState): string {
       ? "Pasang terjemahan melalui Beranda sebelum menerapkan UID kustom."
       : "Tampilan UID siap dikustomisasi dalam simulasi ini.";
 
-  return `<section class="page-heading"><span class="eyebrow">Identitas di layar</span><h1>Custom UID</h1><p>Buat tampilan UID sesuai gayamu, tanpa mengubah identitas akun.</p></section>
+  return `<section class="page-heading"><p class="eyebrow">02 / STUDIO TAMPILAN</p><h1>Sedikit lebih <em>kamu.</em></h1><p>Eksperimen dengan identitas di layar. UID akun tetap sama.</p></section>
     <div class="uid-grid">
-      <section class="card" aria-labelledby="uid-title">
-        <div class="card-header"><div><p class="eyebrow">KUSTOMISASI TAMPILAN</p><h2 id="uid-title">UID versimu</h2></div><span class="badge ${canCustomize ? "badge-good" : "badge-warning"}">${canCustomize ? "Siap dikustomisasi" : "Perlu persiapan"}</span></div>
-        <p class="muted">${escapeHtml(gate)}</p>
+      <section class="card uid-editor" aria-labelledby="uid-title">
+        <div class="card-header"><div><p class="eyebrow">PERSONALISASI</p><h2 id="uid-title">Tulis identitasmu</h2></div>${icon("customize")}</div>
+        <span class="badge ${canCustomize ? "badge-good" : "badge-warning"}">${canCustomize ? "Studio siap" : "Perlu persiapan"}</span>
+        <p class="muted uid-gate">${escapeHtml(gate)}</p>
         <form id="uid-form">
-          <label class="field-label" for="uid-input">Teks UID kustom</label>
+          <label class="field-label" for="uid-input">Tampilan UID</label>
           <input class="uid-input" id="uid-input" name="customUid" type="text" maxlength="${UID_MAX_LENGTH}" value="${escapeHtml(state.uidDraft)}" placeholder="Contoh: Rover Indonesia" autocomplete="off" spellcheck="false" aria-describedby="uid-help" ${state.busy ? "disabled" : ""} />
-          <div class="uid-input-meta"><span id="uid-help">Teks atau angka · maksimal ${UID_MAX_LENGTH} karakter</span><span id="uid-count">${state.uidDraft.length}/${UID_MAX_LENGTH}</span></div>
-          <div class="actions"><button class="btn btn-primary" id="apply-uid" type="submit" ${canApply ? "" : "disabled"}>${icon("check")} Terapkan UID</button>${button("restore-uid", `${icon("refresh")} Pulihkan UID bawaan`, !canCustomize || d.uid.custom === null)}</div>
+          <div class="uid-input-meta"><span id="uid-help">Teks atau angka · maks. ${UID_MAX_LENGTH}</span><span id="uid-count">${state.uidDraft.length}/${UID_MAX_LENGTH}</span></div>
+          <div class="actions"><button class="btn btn-primary" id="apply-uid" type="submit" ${canApply ? "" : "disabled"}>${icon("check")} Terapkan di simulasi</button>${button("restore-uid", `${icon("refresh")} Reset tampilan`, !canCustomize || d.uid.custom === null)}</div>
         </form>
         <dl class="info-list uid-info">
-          <div class="info-row"><dt>UID bawaan</dt><dd>${escapeHtml(d.uid.original)} <span class="muted">(contoh mock)</span></dd></div>
-          <div class="info-row"><dt>Tampilan aktif</dt><dd id="uid-active">${escapeHtml(current)}<span class="badge ${d.uid.custom === null ? "" : "badge-good"}">${d.uid.custom === null ? "Bawaan" : "Kustom"}</span></dd></div>
+          <div class="info-row"><dt>UID contoh</dt><dd>${escapeHtml(d.uid.original)}</dd></div>
+          <div class="info-row"><dt>Tampilan aktif</dt><dd id="uid-active">${escapeHtml(current)} <span class="badge ${d.uid.custom === null ? "" : "badge-good"}">${d.uid.custom === null ? "Bawaan" : "Kustom"}</span></dd></div>
         </dl>
       </section>
-      <section class="card uid-preview-card" aria-labelledby="uid-preview-title">
-        <div class="card-header"><div><p class="eyebrow">PRATINJAU LANGSUNG</p><h2 id="uid-preview-title">Di sudut petualanganmu</h2></div></div>
+      <section class="uid-preview-card" aria-labelledby="uid-preview-title">
+        <div class="preview-heading"><span class="eyebrow">KANVAS LANGSUNG</span><h2 id="uid-preview-title">Satu dunia. Versimu.</h2></div>
         <div class="uid-preview-stage">
-          <span class="uid-preview-kicker">SOLARIS–3 / RUANG ROVER</span><div class="uid-preview-emblem" aria-hidden="true">${icon("game")}</div>
-          <div class="uid-preview-copy"><span>IDENTITAS DI LAYAR</span><strong>Petualanganmu.<br>Sentuhanmu.</strong></div>
-          <div class="uid-preview-footer"><span>MOCK PREVIEW</span><span class="uid-preview-value">UID: <output id="uid-preview" for="uid-input">${escapeHtml(draft || d.uid.original)}</output></span></div>
+          <span class="uid-preview-kicker">RUANG RESONANSI / ID</span><span class="preview-orbit" aria-hidden="true"></span>
+          <div class="uid-preview-copy"><span>CATATAN SEORANG ROVER</span><strong>Jejak kecil.<br><em>Cerita besar.</em></strong></div>
+          <div class="uid-preview-footer"><span>PRATINJAU ILUSTRATIF</span><span class="uid-preview-value">UID: <output id="uid-preview" for="uid-input">${escapeHtml(draft || d.uid.original)}</output></span></div>
         </div>
-        <p class="muted">Pratinjau ilustratif, bukan tangkapan layar game. Teks baru aktif dalam simulasi setelah kamu menekan Terapkan UID.</p>
+        <p class="muted">Bukan tangkapan layar game. Teks baru disimpan dalam simulasi setelah diterapkan.</p>
       </section>
     </div>
-    <section class="simulation-panel" aria-label="Batas kustomisasi UID"><strong>Hanya tampilan, bukan UID akun</strong><p>UID akun asli tetap sama. Mock IPC hanya menyimpan teks tampilan; tidak mengubah akun, menulis file game, atau menyembunyikan UID di game nyata.</p></section>`;
+    <section class="simulation-panel" aria-label="Batas kustomisasi UID">${icon("info")}<div><strong>Ruang bereksperimen, bukan pengubah akun.</strong><p>Mock IPC hanya menyimpan teks tampilan. Tidak mengubah UID akun, menulis file game, atau menyembunyikan UID di game nyata.</p></div></section>`;
 }
 
 export function renderTools(state: UiState): string {
@@ -162,20 +163,26 @@ export function renderTools(state: UiState): string {
   ]
     .map(
       (row) =>
-        `<div class="tool-row"><span class="tool-icon">${icon(row.icon)}</span><div class="tool-copy"><h3>${row.name}</h3><p class="muted">${row.detail}</p></div>${button(row.action, row.label, row.disabled, row.action === "uninstall" ? "btn btn-danger" : "btn btn-secondary")}</div>`,
+        `<div class="tool-row ${row.action === "uninstall" ? "tool-destructive" : ""}"><span class="tool-icon">${icon(row.icon)}</span><div class="tool-copy"><h3>${row.name}</h3><p class="muted">${row.detail}</p></div>${button(row.action, row.label, row.disabled, row.action === "uninstall" ? "btn btn-danger" : "btn btn-secondary")}</div>`,
     )
     .join("");
-  return `<section class="page-heading"><span class="eyebrow">Status perangkat</span><h1>Perawatan</h1><p>Periksa kesiapan dan kelola pemasangan terjemahan.</p></section>
-    <section class="simulation-panel" aria-label="Mode operasi"><strong>${d.mode === "mock" ? "Mode simulasi browser" : "Backend native Tauri"}</strong><p>${d.mode === "mock" ? "Operasi di panel ini hanya mensimulasikan tindakan. Tidak ada file game yang ditulis atau game yang dijalankan." : "PAK diunduh dari rilis latest TitoTFP/WuwaID. SHA-256 diverifikasi sebelum Shizuku menulis paket dan mount terpisah. Hanya berkas milik aplikasi yang dikelola."}</p></section>
-    <section class="card"><div class="card-header"><div><h2>Kesiapan sistem</h2><p class="muted">${escapeHtml(status.detail)}</p></div><span class="badge ${status.ready ? "badge-good" : "badge-warning"}">${escapeHtml(status.label)}</span></div><div class="tool-list">${rows}</div></section>
-    <section class="card"><div class="card-header"><div><h2>Informasi game dan resource</h2><p class="muted">${d.mode === "mock" ? "Rincian status simulasi." : "Rincian status perangkat dan pemasangan native."}</p></div></div><dl class="info-list">
-      <div class="info-row"><dt>Game</dt><dd>${d.game.installed ? "Terpasang" : "Belum ditemukan"} · ${escapeHtml(d.game.version)} · <code>${escapeHtml(d.game.packageName)}</code></dd></div>
-      <div class="info-row"><dt>Shizuku</dt><dd>${d.shizuku.running ? "Berjalan" : "Tidak berjalan"} · ${d.shizuku.granted ? "Izin diberikan" : "Izin belum diberikan"}</dd></div>
-      <div class="info-row"><dt>Resource</dt><dd>${d.resource.ready ? "Siap" : "Belum siap"} · versi ${escapeHtml(d.resource.version)}</dd></div>
-      <div class="info-row"><dt>Terjemahan</dt><dd>${d.patch.installed ? "Terpasang" : "Belum terpasang"} · ${d.patch.healthy ? "Sehat" : "Perlu pemeriksaan"} · versi ${escapeHtml(d.patch.version)}${d.patch.recoveryPending ? " · Pemulihan tertunda" : ""}</dd></div>
-      <div class="info-row"><dt>Konten latest</dt><dd>${escapeHtml(d.mode === "mock" ? "3.7.0-R2 (contoh)" : (d.release?.tag ?? "Belum dimuat"))}</dd></div>
-      ${d.uidAvailable ? `<div class="info-row"><dt>Tampilan UID</dt><dd>${escapeHtml(d.uid.custom ?? d.uid.original)} · ${d.uid.custom === null ? "Bawaan" : "Kustom"} (simulasi)</dd></div>` : ""}
-      ${d.patch.message ? `<div class="info-row"><dt>Detail pemasangan</dt><dd>${escapeHtml(d.patch.message)}</dd></div>` : ""}
-    </dl></section>
-    ${d.mode === "mock" ? `<section class="card"><div class="card-header"><div><h2>Skenario simulasi</h2><p class="muted">Pilih kondisi contoh untuk melihat perilaku antarmuka. Ini tidak mengubah perangkat.</p></div></div><label class="field-label" for="scenario-select">Kondisi simulasi</label><select class="select" id="scenario-select"${state.busy ? " disabled" : ""}>${scenarioOptions}</select></section>` : ""}`;
+  return `<section class="page-heading"><p class="eyebrow">03 / PUSAT PERAWATAN</p><h1>Tetap siap. <em>Tetap tenang.</em></h1><p>Semua yang perlu diperiksa, dalam satu ruang.</p></section>
+    <section class="health-banner" aria-label="Kesiapan sistem"><span class="health-icon ${status.ready ? "healthy" : "needs-attention"}">${icon(status.ready ? "shield" : "info")}</span><div><p class="eyebrow">KONDISI SAAT INI</p><h2>${escapeHtml(status.label)}</h2><p class="muted">${escapeHtml(status.detail)}</p></div><button class="icon-btn" data-action="refresh" aria-label="Periksa ulang kondisi sistem" ${state.busy ? "disabled" : ""}>${icon("refresh")}</button></section>
+    <div class="section-heading"><h2>Kontrol pemasangan</h2><span class="section-index">AMAN & TERKELOLA</span></div>
+    <section class="tool-list" aria-label="Tindakan perawatan">${rows}</section>
+    <div class="tools-detail-grid">
+      <section class="card"><div class="card-header"><div><p class="eyebrow">CATATAN TEKNIS</p><h2>Di balik layar</h2></div>${icon("folder")}</div><dl class="info-list">
+        <div class="info-row"><dt>Game</dt><dd>${d.game.installed ? "Terpasang" : "Belum ditemukan"} · ${escapeHtml(d.game.version)}<code>${escapeHtml(d.game.packageName)}</code></dd></div>
+        <div class="info-row"><dt>Shizuku</dt><dd>${d.shizuku.running ? "Berjalan" : "Tidak berjalan"} · ${d.shizuku.granted ? "Izin diberikan" : "Izin belum diberikan"}</dd></div>
+        <div class="info-row"><dt>Resource</dt><dd>${d.resource.ready ? "Siap" : "Belum siap"} · ${escapeHtml(d.resource.version)}</dd></div>
+        <div class="info-row"><dt>Terjemahan</dt><dd>${d.patch.installed ? "Terpasang" : "Belum terpasang"} · ${d.patch.healthy ? "Sehat" : "Perlu pemeriksaan"} · ${escapeHtml(d.patch.version)}${d.patch.recoveryPending ? " · Pemulihan tertunda" : ""}</dd></div>
+        <div class="info-row"><dt>Rilis latest</dt><dd>${escapeHtml(d.mode === "mock" ? "3.7.0-R2 (contoh)" : (d.release?.tag ?? "Belum dimuat"))}</dd></div>
+        ${d.uidAvailable ? `<div class="info-row"><dt>Tampilan UID</dt><dd>${escapeHtml(d.uid.custom ?? d.uid.original)} · ${d.uid.custom === null ? "Bawaan" : "Kustom"} (simulasi)</dd></div>` : ""}
+        ${d.patch.message ? `<div class="info-row"><dt>Pemasangan</dt><dd>${escapeHtml(d.patch.message)}</dd></div>` : ""}
+      </dl></section>
+      <div class="tools-aside">
+        <section class="simulation-panel" aria-label="Mode operasi">${icon("shield")}<div><strong>${d.mode === "mock" ? "Lingkungan simulasi" : "Pemasangan native"}</strong><p>${d.mode === "mock" ? "Semua tindakan browser menggunakan data contoh. Tidak ada file game yang ditulis atau game yang dijalankan." : "Rilis latest TitoTFP/WuwaID diperiksa dengan SHA-256 sebelum ditulis melalui Shizuku. Hanya paket dan mount milik aplikasi yang dikelola."}</p></div></section>
+        ${d.mode === "mock" ? `<section class="card scenario-card"><div class="card-header"><div><p class="eyebrow">LAB ANTARMUKA</p><h2>Coba kondisi lain</h2></div>${icon("game")}</div><p class="muted">Lihat respons antarmuka saat perangkat siap, izin belum diberikan, atau pemasangan perlu dipulihkan.</p><label class="field-label" for="scenario-select">Skenario simulasi</label><select class="select" id="scenario-select"${state.busy ? " disabled" : ""}>${scenarioOptions}</select></section>` : ""}
+      </div>
+    </div>`;
 }

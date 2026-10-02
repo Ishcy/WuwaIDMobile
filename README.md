@@ -7,7 +7,9 @@ dan Vite; shell native menggunakan Rust. Proyek Android berada di
 
 ## Frontend dan pemasangan PAK
 
-Frontend mengikuti alur hasil [reverse engineering](reverse_engineer/04-ui-and-strings.md):
+Frontend menggunakan desain orisinal **Ruang Resonansi**, bukan rekonstruksi
+antarmuka APK referensi: tipografi editorial, palet tinta–lavender, ilustrasi
+gelombang SVG buatan sendiri, dan tiga ruang kerja:
 
 - **Beranda:** status game, Shizuku, resource, dan rilis; unduh/pasang ulang
   terjemahan dengan progres dan pemeriksaan kompatibilitas.
@@ -15,7 +17,19 @@ Frontend mengikuti alur hasil [reverse engineering](reverse_engineer/04-ui-and-s
   tidak diterapkan ke game oleh backend native; UID akun tidak berubah.
 - **Perawatan:** pemeriksaan ulang, pemulihan transaksi, ekspor diagnostik JSON,
   dan penghapusan berkas milik aplikasi dengan konfirmasi.
-- Sidebar desktop dan navigasi bawah untuk layar Android.
+- Navigasi horizontal di desktop dan dock bawah pada layar Android.
+- **Terang / Gelap / Sistem** tersedia di header. Default mengikuti tema sistem;
+  pilihan disimpan lokal dengan key `wuwaidmobile.theme` dan diterapkan sebelum
+  CSS tampil. Mode Sistem mengikuti perubahan tema perangkat secara langsung.
+  Pergantian tema tidak mereset isian atau menghentikan operasi.
+- Progres hanya memperbarui indikator, bukan membangun ulang navigasi atau kontrol
+  tema. Tema juga diterapkan pada dialog, toast, form, dan status error.
+
+Layout dan navigasi ketiga layar diverifikasi di browser pada lebar 320, 390, 768,
+1024, dan 1440 px tanpa overflow horizontal. Smoke browser mencakup delapan
+skenario perangkat, pemasangan/progres, penerapan UID, pembatalan/konfirmasi
+penghapusan, serta persistensi dan perubahan tema sistem. Verifikasi redesign ini
+belum dilakukan pada APK/WebView Android.
 
 ### Android: pemasangan native
 

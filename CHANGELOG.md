@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Reimagine the frontend as an original ink/lavender editorial workspace with
+  custom resonance artwork, horizontal desktop navigation, a mobile dock,
+  a UID studio, and a maintenance control center; no reference APK UI/assets.
+- Add persistent light, dark, and system themes with pre-paint initialization,
+  live system preference tracking, and themed dialogs, forms, and notifications.
+- Keep navigation/theme controls stable during operations and update progress
+  in place so interaction and keyboard focus are not discarded by progress events.
+
 - Fix Resource Mount entries to use extensionless PAK base paths, matching the
   launcher and Android bytecode rather than physical filenames.
 - Mark old owned descriptors unhealthy and allow transactional repair or safe
