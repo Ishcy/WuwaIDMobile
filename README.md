@@ -7,9 +7,8 @@ dan Vite; shell native menggunakan Rust. Proyek Android berada di
 
 ## Frontend dan pemasangan PAK
 
-Frontend menggunakan desain orisinal **Ruang Resonansi**, bukan rekonstruksi
-antarmuka APK referensi: tipografi editorial, palet tinta–lavender, ilustrasi
-gelombang SVG buatan sendiri, dan tiga ruang kerja:
+Frontend minimalis dengan palet tinta–lavender, tanpa meniru antarmuka APK
+referensi. Tiga layar:
 
 - **Beranda:** status game, Shizuku, resource, dan rilis; unduh/pasang ulang
   terjemahan dengan progres dan pemeriksaan kompatibilitas.
@@ -24,6 +23,12 @@ gelombang SVG buatan sendiri, dan tiga ruang kerja:
   Pergantian tema tidak mereset isian atau menghentikan operasi.
 - Progres hanya memperbarui indikator, bukan membangun ulang navigasi atau kontrol
   tema. Tema juga diterapkan pada dialog, toast, form, dan status error.
+- Copy hanya memuat status, versi, tindakan, dan peringatan. Detail teknis di
+  Perawatan dapat dibuka saat diperlukan; slogan dan label dekoratif dihapus.
+- Animasi 140–180 ms untuk navigasi, kontrol, tema, progres, dialog, dan toast.
+  Animasi layar hanya berjalan saat pindah halaman, bukan setiap pembaruan status.
+  Pengaturan `prefers-reduced-motion` menonaktifkan animasi, termasuk saat diubah
+  ketika aplikasi terbuka.
 
 Layout dan navigasi ketiga layar diverifikasi di browser pada lebar 320, 390, 768,
 1024, dan 1440 px tanpa overflow horizontal. Smoke browser mencakup delapan
@@ -44,7 +49,7 @@ PAK diperlakukan sebagai berkas opaque: tidak diekstrak atau didecompile.
 2. Buka game dan selesaikan unduhan resource, termasuk paket bahasa Inggris.
 3. Pasang dan jalankan [Shizuku](https://shizuku.rikka.app/), lalu berikan izin
    ke WuwaIDMobile melalui tombol **Berikan izin Shizuku**.
-4. Periksa kembali perangkat, lalu pilih **Unduh & pasang terjemahan**.
+4. Periksa kembali perangkat, lalu pilih **Pasang terjemahan**.
 
 Backend menemukan versi resource numerik yang sudah termaterialisasi dan pasangan
 PAK/signature resmi, dengan preferensi `Lang_en`. Lini versi game dan resource

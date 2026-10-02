@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Add restrained 140–180 ms navigation, control, theme, disclosure, dialog,
+  and toast transitions; interpolate accessible progress without layout reflow.
+  Honor live reduced-motion preferences and avoid replaying page entrances on
+  status/progress updates.
+
+- Simplify all three screens: remove promotional copy, decorative artwork,
+  numbered labels, and repeated notices; use concise status/action text and
+  collapsible technical details. Remove the package detail section from Beranda.
+  Preserve themes and operation controls.
+
 - Reimagine the frontend as an original ink/lavender editorial workspace with
   custom resonance artwork, horizontal desktop navigation, a mobile dock,
   a UID studio, and a maintenance control center; no reference APK UI/assets.

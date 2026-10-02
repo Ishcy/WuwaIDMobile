@@ -178,8 +178,8 @@ async function perform(
   try {
     const next = clone(dashboard);
     const phases: Progress[] = [
-      { percent: 18, label: "Menyiapkan simulasi…" },
-      { percent: 58, label: "Memproses perubahan simulasi…" },
+      { percent: 18, label: "Menyiapkan…" },
+      { percent: 58, label: "Memproses…" },
       { percent: 100, label: "Simulasi selesai" },
     ];
     if (operation === "request_permission") {

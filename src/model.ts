@@ -96,13 +96,13 @@ export function readiness(d: Dashboard): {
       label: "Memerlukan Android",
       detail:
         d.blocker ??
-        "Pemasangan game menggunakan Shizuku pada Android. Browser hanya menyediakan pratinjau simulasi.",
+        "Pemasangan memerlukan Android dan Shizuku.",
     };
   if (!d.game.installed)
     return {
       ready: false,
       label: "Game belum ditemukan",
-      detail: "Pasang Wuthering Waves Global, lalu periksa kembali perangkat.",
+      detail: "Pasang Wuthering Waves Global, lalu periksa ulang.",
     };
   if (
     d.mode === "native" &&
@@ -114,20 +114,20 @@ export function readiness(d: Dashboard): {
       ready: false,
       label: "Rilis belum tersedia",
       detail:
-        d.blocker ?? "Periksa koneksi, lalu muat ulang rilis terbaru WuwaID.",
+        d.blocker ?? "Periksa koneksi, lalu muat ulang rilis.",
     };
   if (!d.shizuku.running)
     return {
       ready: false,
       label: "Shizuku belum aktif",
       detail:
-        "Jalankan Shizuku terlebih dahulu untuk mengakses direktori game.",
+        "Jalankan Shizuku untuk mengakses file game.",
     };
   if (!d.shizuku.granted)
     return {
       ready: false,
       label: "Izin diperlukan",
-      detail: "Berikan izin Shizuku sebelum memasang terjemahan.",
+      detail: "Berikan izin Shizuku.",
     };
   if (!compatibleGameVersion(d, d.game.version))
     return {
@@ -135,8 +135,8 @@ export function readiness(d: Dashboard): {
       label: "Versi belum didukung",
       detail:
         d.mode === "mock"
-          ? "Paket simulasi ini memerlukan game dan resource versi 3.7.0."
-          : `Rilis ${d.release?.tag ?? "terbaru"} mendukung lini game ${d.release?.gameVersion.split(".").slice(0, 2).join(".") ?? "yang tercantum di rilis"}.`,
+          ? "Game dan resource harus versi 3.7.0."
+          : `Rilis ${d.release?.tag ?? "terbaru"} memerlukan game ${d.release?.gameVersion.split(".").slice(0, 2).join(".") ?? "sesuai rilis"}.`,
     };
   if (!d.resource.ready || !compatibleGameVersion(d, d.resource.version))
     return {
@@ -144,7 +144,7 @@ export function readiness(d: Dashboard): {
       label: "Resource belum siap",
       detail:
         d.blocker ??
-        "Selesaikan unduhan resource di dalam game, lalu periksa kembali.",
+        "Selesaikan unduhan resource di game, lalu periksa ulang.",
     };
   if (d.blocker || !d.storageWritable)
     return {
@@ -157,12 +157,12 @@ export function readiness(d: Dashboard): {
     return {
       ready: false,
       label: "Perlu pemulihan",
-      detail: "Pulihkan pemasangan melalui menu Perawatan sebelum melanjutkan.",
+      detail: "Jalankan Perbaiki di Perawatan.",
     };
   return {
     ready: true,
     label: d.patch.installed ? "Terjemahan terpasang" : "Siap dipasang",
     detail:
-      "Game, izin Shizuku, dan resource kompatibel dengan paket terjemahan.",
+      "Game, Shizuku, dan resource siap.",
   };
 }

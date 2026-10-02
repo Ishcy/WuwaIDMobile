@@ -17,12 +17,18 @@ const toast = document.querySelector<HTMLDivElement>("#toast")!;
 const dialog = document.querySelector<HTMLDialogElement>("#confirm-dialog")!;
 let state: UiState;
 let section: Section = "home";
+let renderedSection: Section | undefined;
+const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+reducedMotion.addEventListener("change", () => {
+  if (reducedMotion.matches)
+    app.querySelector("#main-content")?.getAnimations().forEach((animation) => animation.cancel());
+});
 let error = "";
 let toastTimer: number;
-const navigation: { id: Section; label: string; number: string }[] = [
-  { id: "home", label: "Beranda", number: "01" },
-  { id: "customize", label: "Kustomisasi", number: "02" },
-  { id: "tools", label: "Perawatan", number: "03" },
+const navigation: { id: Section; label: string }[] = [
+  { id: "home", label: "Beranda" },
+  { id: "customize", label: "Kustomisasi" },
+  { id: "tools", label: "Perawatan" },
 ];
 const logo = '<svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M3 16c5-17 9 17 14 0s9 17 12 0M3 23c5-17 9 17 14 0s9 17 12 0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
 type ThemePreference = "light" | "dark" | "system";
@@ -69,25 +75,24 @@ function renderHome() {
   const disabled = state.busy || !d.platformSupported ? "disabled" : "";
   let primary: { action: string; label: string } = {
     action: "install",
-    label:
-      d.mode === "mock" ? "Pasang terjemahan" : "Unduh & pasang terjemahan",
+    label: "Pasang terjemahan",
   };
   if (!d.platformSupported)
-    primary = { action: "refresh", label: "Pemasangan memerlukan Android" };
+    primary = { action: "refresh", label: "Perlu Android" };
   else if (!d.game.installed)
-    primary = { action: "setup-game", label: "Pasang Wuthering Waves Global" };
+    primary = { action: "setup-game", label: "Pasang game" };
   else if (!d.shizuku.running)
     primary = { action: "setup-shizuku", label: "Buka Shizuku" };
   else if (!d.shizuku.granted)
     primary = { action: "request_permission", label: "Berikan izin Shizuku" };
   else if (d.mode === "native" && !d.release)
-    primary = { action: "refresh", label: "Muat ulang rilis terbaru" };
+    primary = { action: "refresh", label: "Muat ulang rilis" };
   else if (!compatibleGameVersion(d, d.game.version))
     primary = { action: "tools", label: "Lihat kompatibilitas" };
   else if (!d.resource.ready)
     primary = {
       action: "launch_game",
-      label: "Buka game untuk unduh resource",
+      label: "Buka game",
     };
   else if (!ready.ready) primary = { action: "tools", label: "Buka Perawatan" };
   else if (
@@ -116,7 +121,7 @@ function renderHome() {
         : !d.shizuku.running
           ? "Belum aktif"
           : d.shizuku.granted
-            ? "Aktif · izin diberikan"
+            ? "Aktif · diizinkan"
             : "Menunggu izin",
       ok: d.shizuku.running && d.shizuku.granted,
       icon: "shield",
@@ -140,42 +145,22 @@ function renderHome() {
       : d.release
         ? `${d.release.gameVersion.split(".").slice(0, 2).join(".")}.*`
         : "—";
-  return `<section class="resonance-hero" aria-labelledby="hero-title">
-      <div class="hero-copy">
-        <p class="eyebrow"><span class="tiny-dot"></span> WUTHERING WAVES, DALAM BAHASA KITA</p>
-        <h1 id="hero-title">Pahami ceritanya.<br><em>Rasakan dunianya.</em></h1>
-        <p class="hero-description">Jarak boleh jauh. Cerita tetap dekat.<br>Bawa Bahasa Indonesia ke petualanganmu di Solaris-3.</p>
-        <div class="hero-actions"><button class="btn btn-primary" data-action="${primary.action}" ${disabled}>${icon(d.patch.installed ? "external" : "download")} ${primary.label} ${icon("arrow")}</button><button class="text-button" data-section="tools">Cek perangkat ${icon("arrow")}</button></div>
-        <div class="hero-status"><span class="status-dot ${ready.ready ? "good" : "warning"}"></span><span>${esc(ready.label)}</span><span class="hero-status-divider">/</span><span>${d.mode === "mock" ? "Pratinjau browser" : "Pemasangan native"}</span></div>
-      </div>
-      <div class="resonance-art" aria-hidden="true">
-        <span class="art-caption">FREKUENSI YANG SAMA.<br>BAHASA YANG BERBEDA.</span>
-        <svg class="resonance-sculpture" viewBox="0 0 520 440" fill="none">
-          <defs><linearGradient id="wave-ink" x1="100" y1="0" x2="430" y2="440" gradientUnits="userSpaceOnUse"><stop stop-color="currentColor"/><stop offset="1" stop-color="currentColor" stop-opacity=".12"/></linearGradient></defs>
-          <g stroke="url(#wave-ink)" stroke-width="1.2">
-            ${Array.from({ length: 30 }, (_, i) => `<ellipse cx="260" cy="223" rx="${76 + i * 3.9}" ry="${147 - i * 2.3}" transform="rotate(${i * 3 - 43} 260 223)"/>`).join("")}
-          </g><path d="M52 224h416M260 32v382" stroke="currentColor" stroke-opacity=".14" stroke-dasharray="3 7"/><circle cx="260" cy="223" r="5" fill="currentColor"/><circle cx="450" cy="224" r="3" fill="currentColor"/>
-        </svg>
-        <div class="art-footer"><span>RESONANSI / 001</span><span>EN <span class="art-arrow">↗</span> ID</span></div>
-      </div>
+  return `<section class="page-heading home-heading">
+      <div><h1>Bahasa Indonesia</h1><p>Terjemahan Wuthering Waves</p></div>
+      <button class="btn btn-primary" data-action="${primary.action}" ${disabled}>${icon(d.patch.installed ? "external" : "download")} ${primary.label}</button>
     </section>
-    <div class="section-heading"><div><span class="eyebrow">RUANG KENDALI</span><h2>Siap untuk cerita berikutnya.</h2></div><span class="section-index">01 — 03</span></div>
     <div class="home-grid">
       <section class="card translation-card" aria-labelledby="translation-title">
-        <div class="card-header"><div><p class="eyebrow">01 / PAKET BAHASA</p><h2 id="translation-title">Bahasa Indonesia</h2></div><span class="language-mark">Aa<span>EN → ID</span></span></div>
-        <p class="muted">Dialog dan misi dalam bahasa kita. Nama karakter, senjata, dan lokasi tetap dalam bahasa Inggris.</p>
-        <div class="package-facts"><div><span>Rilis terbaru</span><strong>${esc(contentVersion)}</strong></div><div><span>Untuk game</span><strong>${esc(gameLine)}</strong></div>${d.patch.installed ? `<div><span>Terpasang</span><strong>${esc(d.patch.version)}</strong></div>` : ""}</div>
-        <div class="package-state"><span class="status-dot ${ready.ready ? "good" : "warning"}"></span><div><strong>${esc(ready.label)}</strong><p>${esc(ready.detail)}</p></div></div>
-        ${d.patch.installed && ready.ready ? `<button class="text-button" data-action="install" ${disabled}>Pasang ulang terjemahan ${icon("refresh")}</button>` : ""}
-        ${d.release ? `<details class="release-details"><summary>Detail paket · ${(d.release.size / 1048576).toFixed(1)} MB</summary><p>${esc(d.release.assetName)}</p><p>SHA-256: <code>${esc(d.release.sha256)}</code></p><a href="https://github.com/TitoTFP/WuwaID/releases/latest" target="_blank" rel="noopener noreferrer">Lihat rilis di GitHub ${icon("external")}</a></details>` : ""}
-        <p class="safety-note">${icon("shield")} ${d.mode === "mock" ? "Simulasi saja. File game tidak diubah." : "SHA-256 diverifikasi. PAK asli tidak ditimpa."}</p>
+        <div class="card-header"><h2 id="translation-title">Paket</h2>${icon("download")}</div>
+        <div class="package-state"><span class="status-dot ${ready.ready ? "good" : "warning"}"></span><div><strong>${esc(ready.label)}</strong>${!ready.ready ? `<p>${esc(ready.detail)}</p>` : ""}</div></div>
+        <div class="package-facts"><div><span>Terbaru</span><strong>${esc(contentVersion)}</strong></div><div><span>Versi game</span><strong>${esc(gameLine)}</strong></div>${d.patch.installed ? `<div><span>Terpasang</span><strong>${esc(d.patch.version)}</strong></div>` : ""}</div>
+        ${d.patch.installed && ready.ready ? `<button class="text-button" data-action="install" ${disabled}>Pasang ulang ${icon("refresh")}</button>` : ""}
+        ${d.mode === "native" && d.platformSupported ? `<p class="safety-note">${icon("shield")} PAK asli tetap utuh. Game ditutup saat pemasangan.</p>` : ""}
       </section>
-      <section class="card device-card" aria-labelledby="device-title"><div class="card-header"><div><p class="eyebrow">02 / KESIAPAN PERANGKAT</p><h2 id="device-title">Sebelum berangkat</h2></div><button class="icon-btn" data-action="refresh" aria-label="Periksa ulang perangkat" ${state.busy ? "disabled" : ""}>${icon("refresh")}</button></div>
+      <section class="card device-card" aria-labelledby="device-title">
+        <div class="card-header"><h2 id="device-title">Perangkat</h2><button class="icon-btn" data-action="refresh" aria-label="Periksa perangkat" ${state.busy ? "disabled" : ""}>${icon("refresh")}</button></div>
         <div class="device-list">${deviceRows.map((row) => `<div class="device-row"><span class="device-icon">${icon(row.icon)}</span><div><strong>${row.name}</strong><p>${esc(row.value)}</p></div><span class="device-check ${row.ok ? "" : "pending"}" aria-label="${row.ok ? "Siap" : "Perlu perhatian"}">${row.ok ? icon("check") : icon("info")}</span></div>`).join("")}</div>
-        <div class="device-note">${icon("info")}<p>${d.mode === "mock" ? "Ini data contoh, bukan pemindaian perangkat. Pemasangan nyata tersedia di aplikasi Android." : d.platformSupported ? "Status dari Android/Shizuku. Game akan dihentikan sebelum penulisan paket." : "Desktop tidak mengakses resource Android. Gunakan aplikasi Android untuk pemasangan."}</p></div>
-        <div class="checked-time">Diperiksa <span>${new Date(d.lastChecked).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}</span></div>
       </section>
-      <button class="studio-card" data-section="customize"><span class="eyebrow">03 / SENTUHAN PERSONAL</span><span class="studio-glyph" aria-hidden="true">R<span>↗</span></span><span class="studio-title">Identitasmu.<br>Gayamu.</span><span class="studio-description">Jelajahi pratinjau UID kustom.</span><span class="studio-link">Buka Kustomisasi ${icon("arrow")}</span></button>
     </div>`;
 }
 
@@ -183,9 +168,9 @@ function render() {
   const focused = document.activeElement as HTMLElement | null;
   const focusAction = focused?.dataset.action;
   if (!app.querySelector(".app-header")) {
-    app.innerHTML = `<header class="app-header"><div class="header-inner"><a class="brand" href="#home" aria-label="WuwaIDMobile Beranda"><span class="brand-symbol">${logo}</span><span>wuwa<span class="brand-id">id</span><small>RUANG RESONANSI</small></span></a><nav class="desktop-nav" aria-label="Navigasi utama">${navigation.map((item) => `<button class="nav-item ${section === item.id ? "active" : ""}" data-section="${item.id}" ${section === item.id ? 'aria-current="page"' : ""}><span>${item.number}</span>${item.label}</button>`).join("")}</nav>${renderThemeControl()}</div></header>
-    <div class="workspace"><div class="context-bar"><span>LOKALISASI INDEPENDEN <span class="context-separator">/</span> INDONESIA</span><span class="mode-label"><span class="tiny-dot"></span>${state.dashboard.mode === "mock" ? "SIMULASI BROWSER" : "NATIVE · TAURI"}</span></div>
-    <main id="main-content" tabindex="-1"></main><footer class="footer"><div class="footer-brand">${logo}<span>Bahasanya kita.<br><strong>Petualangannya bersama.</strong></span></div><p>Proyek komunitas independen.<br>Tidak berafiliasi dengan Kuro Games.</p><span class="footer-coordinate">SOLARIS–3 ↗ ID</span></footer></div>
+    app.innerHTML = `<header class="app-header"><div class="header-inner"><a class="brand" href="#home" aria-label="WuwaIDMobile Beranda"><span class="brand-symbol">${logo}</span><span>wuwa<span class="brand-id">id</span></span></a><nav class="desktop-nav" aria-label="Navigasi utama">${navigation.map((item) => `<button class="nav-item ${section === item.id ? "active" : ""}" data-section="${item.id}" ${section === item.id ? 'aria-current="page"' : ""}>${item.label}</button>`).join("")}</nav>${renderThemeControl()}</div></header>
+    <div class="workspace">${state.dashboard.mode === "mock" ? `<p class="mode-notice">${icon("info")} Simulasi · file game tidak diubah.</p>` : ""}
+    <main id="main-content" tabindex="-1"></main><footer class="footer">Tidak berafiliasi dengan Kuro Games.</footer></div>
     <nav class="mobile-nav" aria-label="Navigasi seluler">${navigation.map((item) => `<button data-section="${item.id}" class="${section === item.id ? "active" : ""}" ${section === item.id ? 'aria-current="page"' : ""}>${icon(item.id)}<span>${item.label}</span></button>`).join("")}</nav>`;
   }
   app.querySelectorAll<HTMLButtonElement>(".desktop-nav [data-section], .mobile-nav [data-section]").forEach((button) => {
@@ -194,14 +179,24 @@ function render() {
     if (active) button.setAttribute("aria-current", "page");
     else button.removeAttribute("aria-current");
   });
-  app.querySelector("#main-content")!.innerHTML = `
+  const content = app.querySelector<HTMLElement>("#main-content")!;
+  content.innerHTML = `
     ${error ? `<div class="error-banner" role="alert">${icon("info")}<span>${esc(error)}</span><button class="icon-btn" data-action="dismiss-error" aria-label="Tutup pesan">${icon("close")}</button></div>` : ""}
-    ${state.busy ? `<div class="progress-card" role="status" aria-live="polite"><div><strong>${esc(state.progress?.label ?? "Menyiapkan operasi…")}</strong><span>${state.progress?.percent ?? 0}%</span></div><progress max="100" value="${state.progress?.percent ?? 0}" aria-label="Progres pemasangan"></progress><p>${state.dashboard.mode === "mock" ? "Simulasi IPC · tidak ada file game yang ditulis" : "Unduhan terverifikasi · pemasangan melalui Shizuku"}</p></div>` : ""}
+    ${state.busy ? `<div class="progress-card" role="status" aria-live="polite"><div><strong>${esc(state.progress?.label ?? "Menyiapkan…")}</strong><span>${state.progress?.percent ?? 0}%</span></div><div class="progress-track" role="progressbar" aria-label="Progres pemasangan" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${state.progress?.percent ?? 0}"><span class="progress-fill" style="transform: scaleX(${(state.progress?.percent ?? 0) / 100})"></span></div></div>` : ""}
     ${section === "home" ? renderHome() : section === "customize" ? renderCustomize(state) : renderTools(state)}`;
+  if (renderedSection !== section) {
+    content.getAnimations().forEach((animation) => animation.cancel());
+    if (!reducedMotion.matches)
+      content.animate(
+        [{ opacity: 0.65, transform: "translateY(4px)" }, { opacity: 1, transform: "translateY(0)" }],
+        { duration: 180, easing: "cubic-bezier(.2, .8, .2, 1)" },
+      );
+    renderedSection = section;
+  }
   dialog.querySelector("p")!.textContent =
     state.dashboard.mode === "mock"
-      ? "Simulasi ini menghapus paket terjemahan dan memulihkan tampilan UID bawaan. File game asli dan UID akun tidak diubah."
-      : "Hapus PAK, salinan signature, dan mount yang dimiliki WuwaIDMobile? File game asli tidak ditimpa atau dihapus.";
+      ? "Hapus terjemahan simulasi dan reset tampilan UID? File game tidak diubah."
+      : "Hapus paket dan mount WuwaIDMobile? File game asli tetap utuh.";
   if (focusAction)
     Array.from(app.querySelectorAll<HTMLElement>("[data-action]"))
       .find((el) => el.dataset.action === focusAction)
@@ -243,31 +238,19 @@ async function operate(operation: Operation, uidText?: string) {
     )
       state.uidDraft = state.dashboard.uid.custom ?? "";
     const messages: Record<Operation, string> = {
-      install:
-        state.dashboard.mode === "mock"
-          ? "Simulasi selesai. Terjemahan Bahasa Indonesia terpasang."
-          : `Rilis ${state.dashboard.patch.version} terpasang dan terverifikasi.`,
-      repair:
-        state.dashboard.mode === "mock"
-          ? "Simulasi pemulihan selesai. Pemasangan kembali sehat."
-          : state.dashboard.patch.installed
-            ? "Pemulihan selesai. Pemasangan telah diverifikasi."
-            : "Transaksi dipulihkan. Belum ada terjemahan terpasang.",
-      uninstall:
-        state.dashboard.mode === "mock"
-          ? "Simulasi selesai. Terjemahan dilepas dan tampilan UID dipulihkan."
-          : "Berkas terjemahan milik WuwaIDMobile berhasil dihapus.",
-      apply_uid:
-        "Tampilan UID kustom diterapkan dalam simulasi. UID akun tidak berubah.",
-      restore_uid: "Tampilan UID bawaan dipulihkan dalam simulasi.",
-      launch_game:
-        state.dashboard.mode === "mock"
-          ? "Permintaan membuka game berhasil disimulasikan. Tidak ada game yang benar-benar dibuka."
-          : "Wuthering Waves dibuka.",
-      request_permission:
-        state.dashboard.mode === "mock"
-          ? "Izin Shizuku diberikan dalam simulasi."
-          : "Izin Shizuku diberikan.",
+      install: `Terjemahan ${state.dashboard.patch.version} terpasang.`,
+      repair: state.dashboard.patch.installed
+        ? "Pemasangan dipulihkan."
+        : "Transaksi dipulihkan. Terjemahan belum terpasang.",
+      uninstall: state.dashboard.mode === "mock"
+        ? "Terjemahan dihapus. Tampilan UID direset."
+        : "Terjemahan dihapus.",
+      apply_uid: "Tampilan UID diterapkan.",
+      restore_uid: "Tampilan UID direset.",
+      launch_game: state.dashboard.mode === "mock"
+        ? "Simulasi buka game selesai."
+        : "Game dibuka.",
+      request_permission: "Izin Shizuku diberikan.",
     };
     notify(messages[operation]);
   });
@@ -280,7 +263,7 @@ app.addEventListener("click", async (event) => {
     try {
       localStorage.setItem("wuwaidmobile.theme", themePreference);
     } catch {
-      notify("Tema berubah untuk sesi ini; penyimpanan preferensi tidak tersedia.");
+      notify("Tema berlaku untuk sesi ini; preferensi tidak dapat disimpan.");
     }
     applyTheme();
     return;
@@ -307,7 +290,7 @@ app.addEventListener("click", async (event) => {
   } else if (action === "refresh")
     await execute(async () => {
       state.dashboard = await api.load();
-      notify(state.dashboard.mode === "mock" ? "Status perangkat simulasi diperbarui." : "Status perangkat diperbarui.");
+      notify("Status diperbarui.");
     });
   else if (action === "restore-uid") await operate("restore_uid");
   else if (action === "uninstall") dialog.showModal();
@@ -322,28 +305,20 @@ app.addEventListener("click", async (event) => {
       link.download = report.filename;
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-      notify(
-        state.dashboard.mode === "mock"
-          ? "Laporan diagnostik simulasi diekspor sebagai JSON."
-          : "Laporan diagnostik native diekspor sebagai JSON.",
-      );
+      notify("Diagnostik diekspor.");
     });
   else if (action === "setup-game" || action === "setup-shizuku") {
     if (state.dashboard.mode === "native") {
       await execute(async () => {
         await api.openSetup(action === "setup-game" ? "game" : "shizuku");
         notify(
-          "Selesaikan pengaturan, lalu kembali dan periksa ulang perangkat.",
+          "Selesaikan pengaturan, lalu periksa ulang.",
         );
       });
     } else {
       section = "tools";
       render();
-      notify(
-        action === "setup-game"
-          ? "Untuk demo browser, pilih skenario Semua siap."
-          : "Di Android, jalankan Shizuku dan berikan izin. Untuk demo browser, ubah skenario perangkat.",
-      );
+      notify('Pilih skenario "Semua siap".');
     }
   } else if (
     action &&
@@ -386,7 +361,7 @@ app.addEventListener("change", async (event) => {
     await execute(async () => {
       state.dashboard = await api.setScenario(target.value as Scenario);
       state.uidDraft = state.dashboard.uid.custom ?? "";
-      notify("Skenario perangkat simulasi diubah.");
+      notify("Skenario diubah.");
     });
 });
 
@@ -408,7 +383,9 @@ api.subscribeProgress((progress) => {
     if (card) {
       card.querySelector("strong")!.textContent = progress.label;
       card.querySelector("div > span")!.textContent = `${progress.percent}%`;
-      card.querySelector("progress")!.value = progress.percent;
+      const track = card.querySelector<HTMLElement>(".progress-track")!;
+      track.setAttribute("aria-valuenow", String(progress.percent));
+      track.querySelector<HTMLElement>(".progress-fill")!.style.transform = `scaleX(${progress.percent / 100})`;
     }
   }
 });
@@ -424,7 +401,7 @@ async function start() {
     };
     render();
   } catch (cause) {
-    app.innerHTML = `<main class="startup-error"><h1>Pratinjau belum dapat dimuat</h1><p>${esc(String(cause))}</p><button class="btn btn-primary" id="retry-start">Coba lagi</button></main>`;
+    app.innerHTML = `<main class="startup-error"><h1>Gagal memuat</h1><p>${esc(String(cause))}</p><button class="btn btn-primary" id="retry-start">Coba lagi</button></main>`;
     document.querySelector("#retry-start")!.addEventListener("click", start);
   }
 }
