@@ -2,6 +2,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use reqwest::blocking::{Client, Response};
@@ -46,6 +47,7 @@ struct GithubAsset {
 
 /// Find the latest stable GitHub release and its unique uploaded PAK asset.
 pub fn latest() -> PakResult<Release> {
+    let _phase = crate::trace::Span::new("latest");
     let client = http_client()?;
     let response = client
         .get(LATEST_RELEASE_URL)
@@ -85,7 +87,7 @@ pub fn latest() -> PakResult<Release> {
 
     let sha256 = match asset.digest.as_deref() {
         Some(digest) => normalize_sha256(digest)?,
-        None => checksum_digest(&client, &metadata, asset)?,
+        None => checksum_digest(client, &metadata, asset)?,
     };
 
     Ok(Release {
@@ -105,6 +107,7 @@ pub fn download(
     cache_dir: &Path,
     progress: &ProgressCallback<'_>,
 ) -> PakResult<PathBuf> {
+    let _download = crate::trace::Span::new("download");
     let sha256 = validate_release(release)?;
     let cache_name = format!("{}-{}", release.tag, release.asset_name);
     let cache_path = cache_dir.join(cache_name);
@@ -113,8 +116,11 @@ pub fn download(
         .map_err(|_| "Tidak dapat menyiapkan direktori cache patch.".to_owned())?;
     emit_progress(progress, 5, "Memeriksa cache patch...");
 
+    let cache_check = crate::trace::Span::new("cache.verify");
     match cache_is_valid(&cache_path, release.size, &sha256) {
         Ok(true) => {
+            drop(cache_check);
+            crate::trace::mark("cache", "hit", release.size);
             emit_progress(progress, 65, "Patch rilis sudah tersedia di cache.");
             return Ok(cache_path);
         }
@@ -123,6 +129,9 @@ pub fn download(
             remove_cache_file(&cache_path)?;
         }
     }
+    drop(cache_check);
+    crate::trace::mark("cache", "miss", 0);
+    let _transfer = crate::trace::Span::new("download.transfer");
 
     let client = http_client()?;
     let response = client
@@ -192,6 +201,7 @@ pub fn download(
         .sync_all()
         .map_err(|_| "Tidak dapat menyimpan file PAK ke cache.".to_owned())?;
     staged.publish(&cache_path)?;
+    crate::trace::mark("download", "bytes", downloaded);
 
     emit_progress(progress, 65, "Unduhan dan pemeriksaan integritas selesai.");
     Ok(cache_path)
@@ -235,29 +245,32 @@ pub fn parse_game_version(tag: &str) -> PakResult<String> {
     Ok(format!("{major}.{minor}.{patch}"))
 }
 
-fn http_client() -> PakResult<Client> {
-    let redirect_policy = Policy::custom(|attempt| {
-        if attempt.previous().len() >= MAX_REDIRECTS {
-            return attempt.error("too many redirects");
-        }
-        let url = attempt.url();
-        if url.scheme() == "https"
-            && url.username().is_empty()
-            && url.password().is_none()
-            && url.port().is_none()
-            && matches!(url.host_str(), Some(GITHUB_HOST | RELEASE_ASSET_HOST))
-        {
-            attempt.follow()
-        } else {
-            attempt.stop()
-        }
+fn http_client() -> PakResult<&'static Client> {
+    static CLIENT: LazyLock<PakResult<Client>> = LazyLock::new(|| {
+        let redirect_policy = Policy::custom(|attempt| {
+            if attempt.previous().len() >= MAX_REDIRECTS {
+                return attempt.error("too many redirects");
+            }
+            let url = attempt.url();
+            if url.scheme() == "https"
+                && url.username().is_empty()
+                && url.password().is_none()
+                && url.port().is_none()
+                && matches!(url.host_str(), Some(GITHUB_HOST | RELEASE_ASSET_HOST))
+            {
+                attempt.follow()
+            } else {
+                attempt.stop()
+            }
+        });
+        Client::builder()
+            .user_agent(USER_AGENT)
+            .connect_timeout(Duration::from_secs(20))
+            .redirect(redirect_policy)
+            .build()
+            .map_err(|_| "Tidak dapat menyiapkan koneksi HTTPS GitHub.".to_owned())
     });
-    Client::builder()
-        .user_agent(USER_AGENT)
-        .connect_timeout(Duration::from_secs(20))
-        .redirect(redirect_policy)
-        .build()
-        .map_err(|_| "Tidak dapat menyiapkan koneksi HTTPS GitHub.".to_owned())
+    CLIENT.as_ref().map_err(Clone::clone)
 }
 
 fn ensure_success(response: Response, action: &str) -> PakResult<Response> {

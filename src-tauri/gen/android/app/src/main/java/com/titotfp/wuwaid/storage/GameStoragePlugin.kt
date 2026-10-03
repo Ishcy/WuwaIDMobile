@@ -9,6 +9,8 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.IBinder
 import android.os.ParcelFileDescriptor
+import org.json.JSONArray
+import org.json.JSONObject
 import android.system.Os
 import android.system.OsConstants
 import androidx.appcompat.app.AppCompatActivity
@@ -40,11 +42,19 @@ class StorageArgs {
   var target: String? = null
   var content: String? = null
   var algorithm: String? = null
+  var paths: List<String>? = null
+  var requestId: Long = 0
 }
 
 @InvokeArg
 class ControlArgs {
   var action: String? = null
+  var requestId: Long = 0
+}
+
+@InvokeArg
+class ProbeArgs {
+  var requestId: Long = 0
 }
 
 @TauriPlugin
@@ -57,9 +67,11 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
   @Volatile private var userService: IStorageUserService? = null
   private var serviceBinding = false
   private var serviceReady: CountDownLatch? = null
+  private var requestId = 0L
+  private var permissionRequestId = 0L
   private val userServiceArgs = Shizuku.UserServiceArgs(
     ComponentName(activity.packageName, StorageUserService::class.java.name)
-  ).daemon(false).tag("wuwaid-storage").version(1).processNameSuffix("wuwaid-storage")
+  ).daemon(false).tag("wuwaid-storage").version(2).processNameSuffix("wuwaid-storage")
   private var serviceConnection: ServiceConnection? = null
   private fun newServiceConnection() = object : ServiceConnection {
     override fun onServiceConnected(name: ComponentName, binder: IBinder) {
@@ -88,6 +100,7 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
   private val permissionListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
     if (requestCode == REQUEST_PERMISSION) {
       val invoke = pendingPermission.getAndSet(null) ?: return@OnRequestPermissionResultListener
+      StorageTrace.mark(permissionRequestId, "permission.wait_user", "end")
       try {
         if (grantResult == PackageManager.PERMISSION_GRANTED && Shizuku.pingBinder() &&
           Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
@@ -103,6 +116,7 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
   }
   private val binderDeadListener = Shizuku.OnBinderDeadListener {
     pendingPermission.getAndSet(null)?.reject("Shizuku stopped while permission was being requested; start Shizuku and try again")
+    StorageTrace.mark(permissionRequestId, "permission.wait_user", "cancel")
     synchronized(serviceLock) {
       userService = null
       serviceBinding = false
@@ -119,7 +133,11 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
 
   @Command
   fun probe(invoke: Invoke) {
-    dispatch(invoke) { probeDevice() }
+    val args = invoke.parseArgs(ProbeArgs::class.java)
+    dispatch(invoke) {
+      requestId = args.requestId
+      StorageTrace.phase(requestId, "probe") { probeDevice() }
+    }
   }
 
   @Command
@@ -132,7 +150,7 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     when (args.action) {
-      "request_permission" -> requestPermission(invoke)
+      "request_permission" -> requestPermission(invoke, args.requestId)
       "launch_game" -> runOnUi(invoke) { launchPackage(GAME_PACKAGE) }
       "open_shizuku" -> runOnUi(invoke) { launchPackage(SHIZUKU_PACKAGE) }
       "open_store" -> runOnUi(invoke) { openStore() }
@@ -148,12 +166,16 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
       invoke.reject("Invalid storage request: ${error.message ?: error.javaClass.simpleName}")
       return
     }
-    dispatch(invoke) { storageOperation(args) }
+    dispatch(invoke) {
+      requestId = args.requestId
+      storageOperation(args)
+    }
   }
 
   override fun onDestroy(activity: AppCompatActivity) {
     if (!destroyed.compareAndSet(false, true)) return
     pendingPermission.getAndSet(null)?.reject("Android storage plugin was destroyed")
+    StorageTrace.mark(permissionRequestId, "permission.wait_user", "cancel")
     Shizuku.removeRequestPermissionResultListener(permissionListener)
     Shizuku.removeBinderDeadListener(binderDeadListener)
     val connection = synchronized(serviceLock) {
@@ -174,7 +196,7 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
     ioExecutor.shutdownNow()
   }
 
-  private fun requestPermission(invoke: Invoke) {
+  private fun requestPermission(invoke: Invoke, id: Long) {
     try {
       requireShizuku()
       if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
@@ -193,21 +215,25 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
       invoke.reject("A Shizuku permission request is already in progress")
       return
     }
+    permissionRequestId = id
     try {
       activity.runOnUiThread {
         try {
           if (pendingPermission.get() === invoke) {
             requireShizuku()
+            StorageTrace.mark(permissionRequestId, "permission.wait_user", "begin")
             Shizuku.requestPermission(REQUEST_PERMISSION)
           }
         } catch (error: Exception) {
           if (pendingPermission.compareAndSet(invoke, null)) {
+            StorageTrace.mark(permissionRequestId, "permission.wait_user", "cancel")
             invoke.reject("Unable to request Shizuku permission: ${error.message ?: error.javaClass.simpleName}")
           }
         }
       }
     } catch (error: Exception) {
       if (pendingPermission.compareAndSet(invoke, null)) {
+        StorageTrace.mark(permissionRequestId, "permission.wait_user", "cancel")
         invoke.reject("Unable to request Shizuku permission: ${error.message ?: error.javaClass.simpleName}")
       }
     }
@@ -281,16 +307,11 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
     var storageError: String? = null
     if (shizukuRunning && shizukuGranted) {
       try {
-        rootReadable = runShell("root_readable").stdoutText().trim() == "1"
+        val status = JSONObject(metadata("probe_root").stdoutText())
+        rootReadable = status.getBoolean("readable")
+        rootWritable = status.getBoolean("writable")
       } catch (error: Exception) {
         storageError = error.message ?: error.javaClass.simpleName
-      }
-      if (rootReadable) {
-        try {
-          rootWritable = runShell("root_writable").stdoutText().trim() == "1"
-        } catch (error: Exception) {
-          if (storageError == null) storageError = error.message ?: error.javaClass.simpleName
-        }
       }
     }
 
@@ -323,13 +344,25 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
   private fun storageOperation(args: StorageArgs): Any? {
     val operation = args.operation ?: throw IllegalArgumentException("Storage operation is required")
     return when (operation) {
-      "list" -> listEntries(validateRelative(args.path ?: "", allowEmpty = true))
-      "stat" -> statPath(validateRelative(required(args.path, "path"), allowEmpty = false))
-      "read_text" -> readText(validateRelative(required(args.path, "path"), allowEmpty = false))
-      "hash" -> hashPath(
-        validateRelative(required(args.path, "path"), allowEmpty = false),
-        args.algorithm ?: throw IllegalArgumentException("Hash algorithm is required")
-      )
+      "list" -> jsonObjects(JSONArray(metadata("list", args.path ?: "").stdoutText()))
+      "stat" -> statObject(JSONObject(metadata("stat", required(args.path, "path")).stdoutText()))
+      "stat_many" -> {
+        val paths = requireNotNull(args.paths) { "Stat batch is required" }
+        require(paths.size <= 64) { "Stat batch exceeds 64 paths" }
+        val result = JSONArray(metadata("stat_many", JSONArray(paths).toString()).stdoutText())
+        require(result.length() == paths.size) { "Malformed stat batch response" }
+        (0 until result.length()).map { statObject(result.getJSONObject(it)) }
+      }
+      "read_text" -> metadata("read_text", required(args.path, "path")).stdoutText()
+      "hashes" -> {
+        val result = JSONObject(metadata("hashes", required(args.path, "path"),
+          required(args.algorithm, "algorithm")).stdoutText())
+        val sha256 = result.getString("sha256")
+        val sha1 = if (result.isNull("sha1")) null else result.getString("sha1")
+        require(sha256.matches(Regex("[0-9a-f]{64}")) &&
+          (sha1 == null || sha1.matches(Regex("[0-9a-f]{40}")))) { "Malformed digest response" }
+        mapOf("size" to result.getLong("size"), "sha256" to sha256, "sha1" to sha1)
+      }
       "mkdir" -> {
         val path = validateRelative(required(args.path, "path"), allowEmpty = false)
         requireWritableTarget(path, allowPatchRoot = true, allowMountDirectory = true, directoryOnly = true)
@@ -380,55 +413,30 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
     }
   }
 
-  private fun listEntries(path: String): List<Map<String, Any>> {
-    val bytes = runShell("list", listOf(path), stdoutLimit = MAX_METADATA_BYTES).stdout
-    if (bytes.isEmpty()) return emptyList()
-    if (bytes.last() != 0.toByte()) throw IllegalStateException("Malformed directory listing from Shizuku")
-    val decoder = StandardCharsets.UTF_8.newDecoder()
-      .onMalformedInput(CodingErrorAction.REPORT)
-      .onUnmappableCharacter(CodingErrorAction.REPORT)
-    val parts = ArrayList<String>()
-    var start = 0
-    for (index in bytes.indices) {
-      if (bytes[index] == 0.toByte()) {
-        parts.add(decoder.reset().decode(java.nio.ByteBuffer.wrap(bytes, start, index - start)).toString())
-        start = index + 1
-      }
+  private fun jsonObjects(array: JSONArray): List<Map<String, Any>> =
+    (0 until array.length()).map {
+      val entry = array.getJSONObject(it)
+      mapOf("name" to entry.getString("name"), "isDir" to entry.getBoolean("isDir"))
     }
-    if (parts.size % 2 != 0) throw IllegalStateException("Malformed directory listing from Shizuku")
-    return parts.chunked(2).map { pair ->
-      mapOf("name" to pair[0], "isDir" to (pair[1] == "1"))
-    }
-  }
 
-  private fun statPath(path: String): Map<String, Any> {
-    val fields = runShell("stat", listOf(path)).stdoutText().trim().split('\t')
-    if (fields.size != 2) throw IllegalStateException("Malformed file status from Shizuku")
-    return when (fields[0]) {
-      "N" -> mapOf("exists" to false, "isDir" to false, "size" to 0L)
-      "D", "F" -> mapOf(
-        "exists" to true,
-        "isDir" to (fields[0] == "D"),
-        "size" to (fields[1].toLongOrNull() ?: throw IllegalStateException("Malformed file size from Shizuku"))
-      )
-      else -> throw IllegalStateException("Malformed file status from Shizuku")
-    }
-  }
+  private fun statObject(value: JSONObject): Map<String, Any> = mapOf(
+    "exists" to value.getBoolean("exists"), "isDir" to value.getBoolean("isDir"),
+    "size" to value.getLong("size")
+  )
 
-  private fun readText(path: String): String =
-    runShell("read_text", listOf(path), stdoutLimit = MAX_TEXT_BYTES).stdoutText()
-
-  private fun hashPath(path: String, algorithm: String): String {
-    if (algorithm != "sha1" && algorithm != "sha256") {
-      throw IllegalArgumentException("Unsupported hash algorithm")
+  private fun metadata(operation: String, first: String? = null, second: String? = null): ShellResult =
+    StorageTrace.phase(requestId, when (operation) {
+      "probe_root" -> "bridge.probe_root"
+      "list" -> "bridge.list"
+      "stat" -> "bridge.stat"
+      "stat_many" -> "bridge.stat_many"
+      "read_text" -> "bridge.read_text"
+      "hashes" -> "bridge.hashes"
+      else -> "bridge.invalid"
+    }) {
+      val service = StorageTrace.phase(requestId, "bind_service") { connectedUserService() }
+      response(service.metadata(operation, first, second, requestId), MAX_METADATA_BYTES)
     }
-    return runShell("hash", listOf(path, algorithm)).stdoutText().trim().also { digest ->
-      val expectedLength = if (algorithm == "sha1") 40 else 64
-      if (digest.length != expectedLength || digest.any { it !in '0'..'9' && it !in 'a'..'f' && it !in 'A'..'F' }) {
-        throw IllegalStateException("Malformed $algorithm digest from Shizuku")
-      }
-    }
-  }
 
 
   private fun validateRelative(path: String, allowEmpty: Boolean): String {
@@ -567,13 +575,13 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
     stdoutLimit: Int = MAX_METADATA_BYTES
   ): ShellResult {
     if (arguments.size > 2) throw IllegalArgumentException("Too many storage command arguments")
-    val service = connectedUserService()
+    val service = StorageTrace.phase(requestId, "bind_service") { connectedUserService() }
     val pipe = ParcelFileDescriptor.createPipe()
     val readEnd = pipe[0]
     val writeEnd = pipe[1]
     val task = FutureTask {
       try {
-        service.execute(operation, arguments.getOrNull(0), arguments.getOrNull(1), readEnd)
+        service.execute(operation, arguments.getOrNull(0), arguments.getOrNull(1), readEnd, requestId)
       } finally {
         // Release the local reader too: a failed remote call must unblock the writer.
         try { readEnd.close() } catch (_: Exception) {}
@@ -611,6 +619,10 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
     if (expectedInputBytes != null && copiedInputBytes != expectedInputBytes) {
       throw IllegalStateException("App-cache source changed while it was being streamed")
     }
+    return response(response, stdoutLimit)
+  }
+
+  private fun response(response: android.os.Bundle, stdoutLimit: Int): ShellResult {
     val stdout = response.getByteArray(KEY_STDOUT) ?: byteArrayOf()
     val stderr = response.getByteArray(KEY_STDERR) ?: byteArrayOf()
     if (stdout.size > stdoutLimit) throw IllegalStateException("Shizuku metadata response exceeded its limit")

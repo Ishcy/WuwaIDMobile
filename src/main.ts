@@ -204,11 +204,13 @@ function render() {
 
 async function execute(work: () => Promise<void>) {
   if (state.busy) return;
+  const busyTrace = api.beginBusy();
   state.busy = true;
   state.progress = null;
   error = "";
   render();
   try {
+    await busyTrace;
     await work();
   } catch (cause) {
     error = cause instanceof Error ? cause.message : String(cause);
@@ -224,6 +226,7 @@ async function execute(work: () => Promise<void>) {
     state.busy = false;
     state.progress = null;
     render();
+    await api.endBusy();
   }
 }
 

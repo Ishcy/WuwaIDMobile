@@ -4750,6 +4750,7 @@ name = "wuwaidmobile"
 version = "0.1.0"
 dependencies = [
  "hex",
+ "libc",
  "repak",
  "reqwest 0.12.28",
  "rusqlite",

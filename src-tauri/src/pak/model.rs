@@ -41,6 +41,15 @@ pub struct FileStat {
     pub size: u64,
 }
 
+/// Digests and size from one verified regular-file stream, not cached metadata.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileHashes {
+    pub size: u64,
+    pub sha256: String,
+    pub sha1: Option<String>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceProbe {

@@ -201,6 +201,64 @@ APK debug ARM64 beserta verifikasi signature berhasil. Perubahan alur dinamis
 ini belum diuji ulang di game Android: ADB tidak menemukan perangkat ataupun
 layanan mDNS. Bukti gameplay di atas berasal dari alur UID sebelumnya.
 
+### Performa
+
+Optimasi WM-22 mempertahankan pemeriksaan integritas dan transaksi:
+
+- Respons operasi memakai status terminal yang sudah diverifikasi installer,
+  bukan langsung mengulang `discover` dan `inspect`. Snapshot hanya berlaku
+  untuk respons itu; refresh, diagnostik, dan preflight operasi berikutnya
+  tetap membaca serta memverifikasi resource. Probe izin/perangkat tetap dibaca ulang.
+- User service memakai dua worker output tetap dengan buffer baca 64 KiB per
+  worker. Eksekusi proses diserialkan agar kedua reader selalu tersedia untuk
+  stdout/stderr proses yang sama. Penangkapan output tetap dibatasi 256 KiB/16 KiB;
+  kapasitas awal metadata diturunkan dari 8 KiB menjadi 256 byte.
+- Satu klien HTTP dipakai ulang mengikuti
+  [kontrak connection pool reqwest](https://docs.rs/reqwest/0.12.28/reqwest/blocking/struct.Client.html).
+  Host/redirect, timeout, metadata terbaru, ukuran, dan hash tetap diperiksa.
+- Profil Cargo `dev` memakai `opt-level = 2` karena APK debug juga menjalankan
+  hash dan pengemasan PAK penuh. Debug symbols, assertions, overflow checks,
+  dan incremental build tetap aktif; tradeoff-nya kompilasi awal lebih mahal.
+  Pengaturan ini mengikuti [profil Cargo](https://doc.rust-lang.org/cargo/reference/profiles.html).
+- Frontend mempertahankan pembaruan progress in-place. Database rilis memakai
+  indeks `MultiText.Id`; query UID dan `PRAGMA integrity_check` tidak dikurangi.
+
+**Pengukuran host (2026-10-03):** input PAK rilis
+[`v3.7.1-id.1`](https://github.com/TitoTFP/WuwaID/releases/tag/v3.7.1-id.1),
+52.871.888 byte, SHA-256 diverifikasi, dengan 326.830 baris `MultiText`.
+
+| Jalur | Sebelum | Sesudah |
+|---|---|---|
+| Respons sukses native | Mengulangi penemuan/inspeksi | Memakai hasil terminal installer |
+| Thread output baru untuk 120 stat setelah warm-up | 240 | 0; dua worker dipakai ulang |
+| Median 200 pengambilan klien HTTP, tanpa request jaringan | 7,176 ms | < 0,001 ms |
+| Instalasi PAK pada Rust debug host, satu run | 21,283 detik | 0,560 detik |
+| Terapkan UID pada Rust debug host, satu run | 33,318 detik | 1,019 detik |
+
+Pada fixture filesystem host, rangkaian `discover` + `inspect` yang sebelumnya
+diulang memerlukan **47 operasi storage**, termasuk **105.743.952 byte** hash
+dan sekitar **61 ms**. Penghematan waktu/IPC Android belum diukur.
+Durasi batch 120 stat tetap sekitar 0,5 detik sebelum/sesudah; tidak ada klaim
+peningkatan wall-time signifikan dari pooling worker pada host ini.
+Profil mobile browser mencatat nol long task ≥50 ms pada pemasangan mock,
+header/navigasi tetap sama, dan tidak ada overflow horizontal.
+
+Smoke host pada PAK rilis asli membuktikan ketiga target UID tepat, Reset
+identik byte-per-byte dengan sumber, perubahan PAK setelah operasi terdeteksi
+pada inspeksi baru, dan empat resource resmi fixture tetap identik. Smoke
+service mencakup stream 8 MiB, output melebihi batas, penolakan write resmi/
+symlink, serta 32 panggilan konkuren dengan hasil tepat. Smoke HTTPS memakai
+kode downloader asli: membaca latest dua kali, memakai cache terverifikasi,
+menolak cache rusak, mengunduh ulang, dan memverifikasi ukuran/SHA-256.
+Build frontend, 20 tes Rust, APK debug ARM64, dan signature v2 berhasil.
+
+**Batas:** pengukuran memakai Rust release dan debug di host x64. Perbandingan
+debug menggunakan input dan smoke yang sama, dengan `opt-level` 0 → 2; bukan
+waktu APK di perangkat Android. Service JVM memakai adapter Android/AIDL dan
+pemetaan root/shell host, bukan Binder/SELinux nyata. Tidak ada APK dipasang
+atau aplikasi/game dijalankan di perangkat untuk pekerjaan ini; tes perangkat
+asli dilakukan pengguna.
+
 ### Browser dan desktop
 
 `src/ipc.ts` memilih transport sebelum memuat mock: browser memakai `mockIPC`
@@ -227,17 +285,25 @@ data contoh dan custom UID. Ekspor diagnostik membedakan `mock: true` dan
 
 | Perintah | Argumen | Hasil |
 |---|---|---|
-| `wuwa_load` | — | `Dashboard` |
+| `wuwa_load` | `requestId` | `Dashboard` |
 | `wuwa_set_scenario` | `scenario` | `Dashboard` (browser saja) |
-| `wuwa_run` | `operation`, `uidText?` (`apply_uid`) | `Dashboard` |
+| `wuwa_run` | `requestId`, `operation`, `uidText?` (`apply_uid`) | `Dashboard` |
 | `wuwa_open_setup` | `target`: `game` / `shizuku` | — (native) |
-| `wuwa_diagnostics` | — | `Diagnostics` (`filename`, `content`) |
+| `wuwa_diagnostics` | `requestId` | `Diagnostics` (`filename`, `content`) |
+| `wuwa_trace_enabled` | — | Native debug recording enabled (`boolean`) |
+| `wuwa_ui_trace` | `requestId`, `event`, `frontendUs` | —; fixed events, recording disabled by native release builds |
 
 Operasi native: `install`, `repair`, `uninstall`, `request_permission`,
 `launch_game`, `apply_uid`, dan `restore_uid`.
 Operasi mutasi bersamaan ditolak. Kontrak state berada di `src/model.ts`;
 installer/downloader berada di `src-tauri/src/pak/`, orkestrasi di
 `src-tauri/src/native.rs`, dan bridge di `src-tauri/src/android.rs`.
+
+`src/ipc.ts` membuat correlation ID per aksi UI; caller tidak perlu membuat ID
+sendiri. Metadata dan digest dibaca langsung dalam UID Shizuku UserService,
+tanpa shell/helper; mutasi tetap memakai guard dan jurnal yang sama. Panduan
+marker, bukti smoke lokal, dan batas verifikasi WM-23 ada di
+[`docs/android-traces.md`](docs/android-traces.md#implementasi-wm-23).
 
 ## Persiapan
 
@@ -247,6 +313,8 @@ installer/downloader berada di `src-tauri/src/pak/`, orkestrasi di
 - Dependensi sistem Tauri untuk target desktop yang digunakan
 
 Panduan lengkap Android ada di [`docs/android.md`](docs/android.md).
+Analisis lima rekaman performa perangkat beserta SQL reproduksinya ada di
+[`docs/android-traces.md`](docs/android-traces.md).
 
 ## Menjalankan
 

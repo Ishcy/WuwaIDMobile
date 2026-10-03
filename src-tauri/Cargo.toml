@@ -29,6 +29,13 @@ repak = { git = "https://git.xeondev.com/ReversedRoomsMisc/repak.git", rev = "76
 rusqlite = { version = "0.32", features = ["bundled"] }
 tempfile = "3"
 
+[target.'cfg(target_os = "android")'.dependencies]
+libc = "0.2"
+
+# Debug APKs process full PAKs too; retain debug symbols and runtime checks.
+[profile.dev]
+opt-level = 2
+
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]
 codegen-units = 1

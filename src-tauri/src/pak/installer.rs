@@ -71,6 +71,7 @@ struct Journal {
 }
 
 pub fn discover(storage: &dyn Storage) -> PakResult<ResourceLayout> {
+    let _phase = crate::trace::Span::new("discover");
     let versions = resource_versions(storage)?;
     for (_, version) in versions.into_iter().rev() {
         if !is_materialized(storage, &version)? {
@@ -84,23 +85,27 @@ pub fn discover(storage: &dyn Storage) -> PakResult<ResourceLayout> {
 }
 
 pub fn inspect(storage: &dyn Storage, layout: &ResourceLayout) -> PakResult<InstallStatus> {
+    let _phase = crate::trace::Span::new("inspect");
     validate_version(&layout.version)?;
     let paths = target_paths(&layout.version);
     let mut issues = Vec::new();
-    let mut recovery_pending = false;
-    for (_, version) in resource_versions(storage)? {
-        if has_lifecycle_files(storage, &version)? {
-            recovery_pending = true;
-            break;
-        }
+    let versions = resource_versions(storage)?;
+    let mut lifecycle = Vec::new();
+    for (_, version) in versions {
+        lifecycle.extend(all_lifecycle_paths(&version));
     }
-    let mut installed = false;
-    for path in &paths {
-        installed |= file_exists(storage, path)?;
-    }
-    for path in artifact_lifecycle_paths(&layout.version) {
-        installed |= file_exists(storage, &path)?;
-    }
+    let current_lifecycle = artifact_lifecycle_paths(&layout.version);
+    let mut metadata_paths = lifecycle.clone();
+    metadata_paths.extend(paths.iter().cloned());
+    metadata_paths.extend(current_lifecycle.iter().cloned());
+    metadata_paths.sort_unstable();
+    metadata_paths.dedup();
+    let metadata = storage.stat_many(&metadata_paths)?;
+    if metadata.len() != metadata_paths.len() { return Err("Incomplete storage metadata batch".into()); }
+    let existing: HashSet<_> = metadata_paths.iter().zip(&metadata)
+        .filter(|(_, stat)| stat.exists).map(|(path, _)| path.as_str()).collect();
+    let recovery_pending = lifecycle.iter().any(|path| existing.contains(path.as_str()));
+    let installed = paths.iter().chain(&current_lifecycle).any(|path| existing.contains(path.as_str()));
 
     let owner_path = target_path(&layout.version, Slot::Owner);
     let owner = match load_owner(storage, &layout.version) {
@@ -166,7 +171,7 @@ pub fn install(
     progress: &ProgressCallback,
 ) -> PakResult<InstallStatus> {
     let custom_uid = custom_uid.map(uid::validate_text).transpose()?;
-    recover(storage, layout, progress)?;
+    recover_transactions(storage, layout, progress)?;
     install_current(storage, layout, release, pak, custom_uid, progress)
 }
 
@@ -179,7 +184,7 @@ pub fn repair(
     progress: &ProgressCallback,
 ) -> PakResult<InstallStatus> {
     let custom_uid = custom_uid.map(uid::validate_text).transpose()?;
-    recover(storage, layout, progress)?;
+    recover_transactions(storage, layout, progress)?;
     install_current(storage, layout, release, pak, custom_uid, progress)
 }
 
@@ -188,6 +193,16 @@ pub fn recover(
     layout: &ResourceLayout,
     progress: &ProgressCallback,
 ) -> PakResult<InstallStatus> {
+    recover_transactions(storage, layout, progress)?;
+    { let _phase = crate::trace::Span::new("inspect.terminal"); inspect(storage, layout) }
+}
+
+fn recover_transactions(
+    storage: &dyn Storage,
+    layout: &ResourceLayout,
+    progress: &ProgressCallback,
+) -> PakResult<()> {
+    let _phase = crate::trace::Span::new("recover");
     validate_version(&layout.version)?;
     let mut pending = Vec::new();
     for (_, version) in resource_versions(storage)? {
@@ -212,7 +227,7 @@ pub fn recover(
         }
         notify(progress, 72, "Transaksi pemasangan dipulihkan");
     }
-    inspect(storage, layout)
+    Ok(())
 }
 
 pub fn uninstall(
@@ -220,7 +235,7 @@ pub fn uninstall(
     layout: &ResourceLayout,
     progress: &ProgressCallback,
 ) -> PakResult<InstallStatus> {
-    recover(storage, layout, progress)?;
+    recover_transactions(storage, layout, progress)?;
     validate_version(&layout.version)?;
     ensure_no_lifecycle_files(storage, &layout.version)?;
 
@@ -232,7 +247,7 @@ pub fn uninstall(
                     .to_owned(),
             );
         }
-        return inspect(storage, layout);
+        return { let _phase = crate::trace::Span::new("inspect.terminal"); inspect(storage, layout) };
     };
     verify_owned_content_for_uninstall(storage, &layout.version, &owner)?;
     let before = capture_snapshots(storage, &layout.version)?;
@@ -263,7 +278,7 @@ pub fn uninstall(
         }
     }
     notify(progress, 100, "Penghapusan selesai");
-    inspect(storage, layout)
+    { let _phase = crate::trace::Span::new("inspect.terminal"); inspect(storage, layout) }
 }
 
 fn install_current(
@@ -288,12 +303,12 @@ fn install_current(
                 .to_owned(),
         );
     }
-    let signature_stats = storage.stat(&official_signature)?;
-    if !signature_stats.exists || signature_stats.is_dir || signature_stats.size == 0 {
-        return Err("The selected official signature is missing or empty".to_owned());
+    let signature_hashes = checked_hashes(storage, &official_signature, true)?;
+    if signature_hashes.size == 0 {
+        return Err("The selected official signature is empty".to_owned());
     }
-    let official_signature_sha256 = checked_hash(storage, &official_signature, "sha256")?;
-    let official_signature_sha1 = checked_hash(storage, &official_signature, "sha1")?;
+    let official_signature_sha256 = &signature_hashes.sha256;
+    let official_signature_sha1 = signature_hashes.sha1.as_deref().expect("verified SHA-1");
 
     let owner = load_owner(storage, &layout.version)?;
     if owner.is_none() && paths_have_artifacts(storage, &layout.version)? {
@@ -316,7 +331,7 @@ fn install_current(
         ));
     }
 
-    let source_sha256 = hash_local_file(pak)?;
+    let source_sha256 = { let _phase = crate::trace::Span::new("payload.hash"); hash_local_file(pak)? };
     if !source_sha256.eq_ignore_ascii_case(&release.sha256) {
         return Err("Downloaded PAK SHA-256 does not match release metadata".to_owned());
     }
@@ -337,7 +352,7 @@ fn install_current(
     };
     let payload = derived.as_ref().map(|pak| pak.path()).unwrap_or(pak);
     let expected_sha256 = if derived.is_some() {
-        hash_local_file(payload)?
+        { let _phase = crate::trace::Span::new("payload.hash"); hash_local_file(payload)? }
     } else {
         source_sha256.clone()
     };
@@ -351,29 +366,32 @@ fn install_current(
     let stages = stage_paths(&layout.version);
     let mut staged_hashes: Vec<Option<String>> = vec![None; SLOTS.len()];
     let stage_result = (|| {
+        let _phase = crate::trace::Span::new("staging");
         storage.write_from_file(&stages[0], payload)?;
         staged_hashes[0] = Some(expected_sha256.clone());
-        let staged_pak_sha256 = checked_hash(storage, &stages[0], "sha256")?;
+        let staged_pak = checked_hashes(storage, &stages[0], true)?;
+        let staged_pak_sha256 = staged_pak.sha256.clone();
         staged_hashes[0] = Some(staged_pak_sha256.clone());
         if staged_pak_sha256 != expected_sha256 {
             return Err("Staged PAK SHA-256 does not match the verified payload".to_owned());
         }
-        if storage.stat(&stages[0])?.size != expected_size {
+        if staged_pak.size != expected_size {
             return Err("Staged PAK size does not match the verified payload".to_owned());
         }
 
         storage.copy(&official_signature, &stages[1])?;
         staged_hashes[1] = Some(official_signature_sha256.clone());
-        let staged_signature_sha256 = checked_hash(storage, &stages[1], "sha256")?;
+        let staged_signature = checked_hashes(storage, &stages[1], true)?;
+        let staged_signature_sha256 = staged_signature.sha256.clone();
         staged_hashes[1] = Some(staged_signature_sha256.clone());
-        if staged_signature_sha256 != official_signature_sha256
-            || storage.stat(&stages[1])?.size != signature_stats.size
+        if staged_signature_sha256 != *official_signature_sha256
+            || staged_signature.size != signature_hashes.size
         {
             return Err("Cloned signature did not verify against its official source".to_owned());
         }
 
-        let pak_sha1 = checked_hash(storage, &stages[0], "sha1")?.to_ascii_uppercase();
-        let signature_sha1 = checked_hash(storage, &stages[1], "sha1")?.to_ascii_uppercase();
+        let pak_sha1 = staged_pak.sha1.expect("verified SHA-1").to_ascii_uppercase();
+        let signature_sha1 = staged_signature.sha1.expect("verified SHA-1").to_ascii_uppercase();
         if signature_sha1.to_ascii_lowercase() != official_signature_sha1 {
             return Err("Cloned signature SHA-1 does not match its official source".to_owned());
         }
@@ -476,12 +494,9 @@ fn install_current(
     match apply_journal(storage, &layout.version, &journal) {
         Ok(()) => {
             notify(progress, 96, "Memverifikasi hasil pemasangan");
-            if let Err(error) = verify_committed_install(storage, &layout.version, &journal) {
-                return Err(recover_after_failure(storage, layout, progress, error));
-            }
             finalize_journal(storage, &layout.version, &journal)?;
             notify(progress, 100, "Pemasangan selesai");
-            inspect(storage, layout)
+            { let _phase = crate::trace::Span::new("inspect.terminal"); inspect(storage, layout) }
         }
         Err(error) => Err(recover_after_failure(storage, layout, progress, error)),
     }
@@ -702,30 +717,21 @@ fn all_lifecycle_paths(version: &str) -> Vec<String> {
     paths
 }
 
-fn has_lifecycle_files(storage: &dyn Storage, version: &str) -> PakResult<bool> {
-    for path in all_lifecycle_paths(version) {
-        if file_exists(storage, &path)? {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
 
 fn has_artifact_lifecycle_files(storage: &dyn Storage, version: &str) -> PakResult<bool> {
-    for path in artifact_lifecycle_paths(version) {
-        if file_exists(storage, &path)? {
-            return Ok(true);
-        }
-    }
-    Ok(false)
+    let paths = artifact_lifecycle_paths(version);
+    let stats = storage.stat_many(&paths)?;
+    if stats.len() != paths.len() { return Err("Incomplete lifecycle metadata batch".into()); }
+    Ok(stats.iter().any(|stat| stat.exists))
 }
 
 fn ensure_no_lifecycle_files(storage: &dyn Storage, version: &str) -> PakResult<()> {
-    for path in all_lifecycle_paths(version) {
-        if file_exists(storage, &path)? {
-            return Err(format!(
-                "Unexpected installer lifecycle path {path}; recover or remove it only after verifying ownership"
-            ));
+    let paths = all_lifecycle_paths(version);
+    let stats = storage.stat_many(&paths)?;
+    if stats.len() != paths.len() { return Err("Incomplete lifecycle metadata batch".into()); }
+    for (path, stat) in paths.iter().zip(stats) {
+        if stat.exists {
+            return Err(format!("Unexpected installer lifecycle path {path}; recover or remove it only after verifying ownership"));
         }
     }
     Ok(())
@@ -835,26 +841,20 @@ fn verify_owned_content(storage: &dyn Storage, version: &str, owner: &Owner) -> 
     ];
     let paths = target_paths(version);
     for index in 0..SLOTS.len() {
-        let stat = storage.stat(&paths[index])?;
-        if !stat.exists {
-            return Err(format!("Owned installer file is missing: {}", paths[index]));
-        }
-        if stat.is_dir {
-            return Err(format!(
-                "Owned installer path is not a file: {}",
-                paths[index]
-            ));
-        }
+        let hashes = if expected[index].is_some() {
+            Some(checked_hashes(storage, &paths[index], expected_sha1[index].is_some())?)
+        } else {
+            let stat = storage.stat(&paths[index])?;
+            if !stat.exists || stat.is_dir { return Err(format!("Owned installer file is missing or not a file: {}", paths[index])); }
+            None
+        };
         if let Some(expected_hash) = &expected[index] {
-            if checked_hash(storage, &paths[index], "sha256")? != *expected_hash {
-                return Err(format!(
-                    "Owned installer file failed SHA-256 verification: {}",
-                    paths[index]
-                ));
+            if hashes.as_ref().expect("requested hashes").sha256 != *expected_hash {
+                return Err(format!("Owned installer file failed SHA-256 verification: {}", paths[index]));
             }
         }
         if let Some(expected_hash) = &expected_sha1[index] {
-            if checked_hash(storage, &paths[index], "sha1")? != *expected_hash {
+            if hashes.as_ref().expect("requested hashes").sha1.as_ref() != Some(expected_hash) {
                 return Err(format!(
                     "Owned installer file failed SHA-1 verification: {}",
                     paths[index]
@@ -897,8 +897,11 @@ fn verify_owned_content_for_uninstall(
                 paths[index]
             ));
         }
+        let hashes = if expected[index].is_some() {
+            Some(checked_hashes(storage, &paths[index], expected_sha1[index].is_some())?)
+        } else { None };
         if let Some(hash) = &expected[index] {
-            if checked_hash(storage, &paths[index], "sha256")? != *hash {
+            if hashes.as_ref().expect("requested hashes").sha256 != *hash {
                 return Err(format!(
                     "Modified file blocks safe uninstall: {}",
                     paths[index]
@@ -906,7 +909,7 @@ fn verify_owned_content_for_uninstall(
             }
         }
         if let Some(hash) = &expected_sha1[index] {
-            if checked_hash(storage, &paths[index], "sha1")? != *hash {
+            if hashes.as_ref().expect("requested hashes").sha1.as_ref() != Some(hash) {
                 return Err(format!(
                     "Modified file blocks safe uninstall: {}",
                     paths[index]
@@ -1078,6 +1081,7 @@ fn fully_applied(storage: &dyn Storage, version: &str, journal: &Journal) -> Pak
 }
 
 fn apply_journal(storage: &dyn Storage, version: &str, journal: &Journal) -> PakResult<()> {
+    let _phase = crate::trace::Span::new("journal.apply");
     backup_current_targets(storage, version, journal)?;
     if journal.operation == Operation::Install {
         let targets = target_paths(version);
@@ -1101,8 +1105,7 @@ fn apply_journal(storage: &dyn Storage, version: &str, journal: &Journal) -> Pak
             }
         }
         verify_committed_install(storage, version, journal)?;
-    }
-    if !fully_applied(storage, version, journal)? {
+    } else if !fully_applied(storage, version, journal)? {
         return Err("Transaction did not reach its exact expected target state".to_owned());
     }
     Ok(())
@@ -1302,12 +1305,12 @@ fn rollback_journal(storage: &dyn Storage, version: &str, journal: &Journal) -> 
 }
 
 fn finalize_journal(storage: &dyn Storage, version: &str, journal: &Journal) -> PakResult<()> {
+    let _phase = crate::trace::Span::new("journal.finalize");
     validate_journal(journal, version)?;
-    if !fully_applied(storage, version, journal)? {
-        return Err("Cannot finalize an incomplete installer transaction".to_owned());
-    }
     if journal.operation == Operation::Install {
         verify_committed_install(storage, version, journal)?;
+    } else if !fully_applied(storage, version, journal)? {
+        return Err("Cannot finalize an incomplete installer transaction".to_owned());
     }
     let stages = stage_paths(version);
     let backups = backup_paths(version);
@@ -1512,21 +1515,23 @@ fn append_cleanup_error(error: String, cleanup: PakResult<()>) -> String {
     }
 }
 
+fn checked_hashes(storage: &dyn Storage, path: &str, with_sha1: bool) -> PakResult<super::model::FileHashes> {
+    let mut hashes = storage.hashes(path, with_sha1)?;
+    hashes.sha256.make_ascii_lowercase();
+    if let Some(sha1) = &mut hashes.sha1 { sha1.make_ascii_lowercase(); }
+    if !valid_hash(&hashes.sha256, 32) || (with_sha1 && !hashes.sha1.as_ref().is_some_and(|hash| valid_hash(hash, 20))) {
+        return Err(format!("Storage returned invalid digests for {path}"));
+    }
+    Ok(hashes)
+}
+
 fn checked_hash(storage: &dyn Storage, path: &str, algorithm: &str) -> PakResult<String> {
-    let stat = storage.stat(path)?;
-    if !stat.exists || stat.is_dir {
-        return Err(format!(
-            "Cannot hash a missing or non-file resource path: {path}"
-        ));
+    let hashes = checked_hashes(storage, path, algorithm == "sha1")?;
+    if algorithm == "sha1" {
+        hashes.sha1.ok_or_else(|| "Storage omitted the requested SHA-1 digest".to_owned())
+    } else {
+        Ok(hashes.sha256)
     }
-    let hash = storage.hash(path, algorithm)?.to_ascii_lowercase();
-    let length = if algorithm == "sha1" { 20 } else { 32 };
-    if !valid_hash(&hash, length) {
-        return Err(format!(
-            "Storage returned an invalid {algorithm} digest for {path}"
-        ));
-    }
-    Ok(hash)
 }
 
 fn hash_local_file(path: &Path) -> PakResult<String> {
@@ -1681,15 +1686,15 @@ mod tests {
         );
         assert_eq!(
             storage
-                .hash(&resolved_pak, "sha1")
-                .expect("mounted PAK hash")
+                .hashes(&resolved_pak, true)
+                .expect("mounted PAK hash").sha1.expect("SHA-1")
                 .to_ascii_uppercase(),
             fields[2]
         );
         assert_eq!(
             storage
-                .hash(&resolved_signature, "sha1")
-                .expect("mounted signature hash")
+                .hashes(&resolved_signature, true)
+                .expect("mounted signature hash").sha1.expect("SHA-1")
                 .to_ascii_uppercase(),
             fields[3]
         );
@@ -1907,6 +1912,24 @@ mod tests {
     }
 
     #[test]
+    fn fresh_inspection_detects_same_size_tamper_and_uninstall_preserves_it() {
+        let (root, storage, pak, layout) = setup_fixture();
+        let release = release(&pak, "v3.7.1-id.1");
+        install(&storage, &layout, &release, &pak, None, &no_progress).unwrap();
+        assert!(inspect(&storage, &layout).unwrap().healthy);
+        let path = root.path().join(target_path(&layout.version, Slot::Pak));
+        let mut changed = fs::read(&path).unwrap();
+        changed[0] ^= 1;
+        fs::write(&path, &changed).unwrap();
+        assert!(!inspect(&storage, &layout).unwrap().healthy);
+        assert!(uninstall(&storage, &layout, &no_progress).is_err());
+        assert_eq!(fs::read(&path).unwrap(), changed);
+        let repaired = repair(&storage, &layout, &release, &pak, None, &no_progress).unwrap();
+        assert!(repaired.healthy && !repaired.recovery_pending);
+        assert_eq!(fs::read(&path).unwrap(), fs::read(&pak).unwrap());
+    }
+
+    #[test]
     fn refuses_unowned_target_collision_and_bad_download_without_mutation() {
         let (_root, storage, pak, layout) = setup_fixture();
         let unowned = format!("3.7.0/{PATCH_DIRECTORY}/{PATCH_FILENAME}");
@@ -1998,8 +2021,11 @@ mod tests {
         fn read_text(&self, path: &str) -> PakResult<String> {
             self.inner.read_text(path)
         }
-        fn hash(&self, path: &str, algorithm: &str) -> PakResult<String> {
-            self.inner.hash(path, algorithm)
+        fn hashes(&self, path: &str, with_sha1: bool) -> PakResult<super::super::model::FileHashes> {
+            self.inner.hashes(path, with_sha1)
+        }
+        fn stat_many(&self, paths: &[String]) -> PakResult<Vec<super::super::model::FileStat>> {
+            self.inner.stat_many(paths)
         }
         fn mkdir(&self, path: &str) -> PakResult<()> {
             self.inner.mkdir(path)
@@ -2046,7 +2072,7 @@ mod tests {
         let snapshot_paths = target_paths(&layout.version);
         let before_hashes: Vec<_> = snapshot_paths
             .iter()
-            .map(|path| storage.hash(path, "sha256").expect("pre-transaction hash"))
+            .map(|path| storage.hashes(path, false).map(|hashes| hashes.sha256).expect("pre-transaction hash"))
             .collect();
 
         let updated_pak = pak.with_file_name("updated.pak");
@@ -2105,7 +2131,7 @@ mod tests {
         assert_eq!(restored.version, first_release.tag);
         for (path, expected_hash) in snapshot_paths.iter().zip(before_hashes) {
             assert_eq!(
-                storage.hash(path, "sha256").expect("restored file hash"),
+                storage.hashes(path, false).expect("restored file hash").sha256,
                 expected_hash
             );
         }
@@ -2143,36 +2169,40 @@ mod tests {
         );
         assert_ne!(owner.pak_sha256, release.sha256);
         let target = target_path(&layout.version, Slot::Pak);
-        assert_eq!(owner.pak_sha256, storage.hash(&target, "sha256").unwrap());
+        assert_eq!(owner.pak_sha256, storage.hashes(&target, false).unwrap().sha256);
         let mount = storage
             .read_text(&target_path(&layout.version, Slot::Mount))
             .unwrap();
         assert_eq!(
             mount,
             mount_content(
-                &storage.hash(&target, "sha1").unwrap().to_ascii_uppercase(),
+                &storage.hashes(&target, true).unwrap().sha1.unwrap().to_ascii_uppercase(),
                 &storage
-                    .hash(&layout.signature, "sha1")
-                    .unwrap()
+                    .hashes(&layout.signature, true)
+                    .unwrap().sha1.unwrap()
                     .to_ascii_uppercase(),
             )
         );
+        let replaced = install(&storage, &layout, &release, &pak, Some("Rover Nusantara"), &no_progress).unwrap();
+        assert!(replaced.healthy && !replaced.recovery_pending);
+        assert_eq!(replaced.custom_uid.as_deref(), Some("Rover Nusantara"));
+        assert_ne!(load_owner(&storage, &layout.version).unwrap().unwrap().pak_sha256, owner.pak_sha256);
         storage.remove(&target).unwrap();
         let repaired = repair(
             &storage,
             &layout,
             &release,
             &pak,
-            applied.custom_uid.as_deref(),
+            replaced.custom_uid.as_deref(),
             &no_progress,
         )
         .unwrap();
         assert!(repaired.healthy);
-        assert_eq!(repaired.custom_uid.as_deref(), Some("Rover Indonesia"));
+        assert_eq!(repaired.custom_uid.as_deref(), Some("Rover Nusantara"));
         let reset = install(&storage, &layout, &release, &pak, None, &no_progress).unwrap();
         assert!(reset.healthy);
         assert_eq!(reset.custom_uid, None);
-        assert_eq!(storage.hash(&target, "sha256").unwrap(), release.sha256);
+        assert_eq!(storage.hashes(&target, false).unwrap().sha256, release.sha256);
         assert_eq!(fs::read(&pak).unwrap(), original);
         assert_eq!(
             fs::read(root.path().join(&layout.signature)).unwrap(),

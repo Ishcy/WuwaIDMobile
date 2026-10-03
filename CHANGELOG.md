@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+- Read root probes, directory listings, batched stat metadata, bounded text, and
+  streaming hashes directly inside the privileged Shizuku UserService (API 24+).
+  Remove their shell scripts, input pipes, and per-request threads; keep mutation
+  allowlists, path/symlink guards, ownership, journals, rollback, and recovery.
+- Return SHA-256, optional SHA-1, and size from the same verified file stream.
+  Batch/deduplicate lifecycle inspection, avoid discarded recovery inspections,
+  and remove overlapping committed-state checks without cross-operation caches.
+- Close every privileged read/hash descriptor explicitly with `Os.close` in
+  `finally`, including rejected reads. Android's borrowed-descriptor
+  `FileInputStream` does not own or close caller FDs; retain regression coverage.
+- Add native-gated debug phase/correlation markers across frontend busy state,
+  permission dialog, service binding, storage, network/cache, UID, and transactions.
+  Release builds do not record UID text, payloads, paths, or debug timings.
+- Verify real-release host install, UID replacement, Reset, tamper refusal,
+  repair/uninstall, Linux-syscall Kotlin metadata safety, and browser busy/idle.
+  Actual-device performance/game verification remains with the user.
+
+- Reuse the installer's verified terminal state for successful-operation
+  dashboards instead of repeating resource discovery and full PAK inspection;
+  keep fresh permission probes, explicit refresh/diagnostics, and next preflight.
+- Reuse two Shizuku output workers and per-worker 64 KiB read buffers, serialize
+  process execution to prevent paired-reader starvation, and shrink initial
+  metadata buffers without changing output limits or storage guards.
+- Share the blocking GitHub HTTP client/connection pool without caching release
+  metadata or weakening redirect, timeout, size, or digest validation.
+- Optimize the dev profile at level 2 for CPU-heavy PAK hashing/repacking in
+  debug APKs while retaining debug symbols, assertions, and overflow checks.
+  With the same real-release host fixture, debug install drops from 21.283s to
+  0.560s and UID Apply from 33.318s to 1.019s; these are not device timings.
+- Profile frontend, indexed UID SQLite, and the real 52,871,888-byte release PAK.
+  Host smoke verifies UID/Reset/tamper detection and streaming/concurrent storage;
+  real HTTPS smoke verifies latest, cache integrity and corrupted-cache re-download.
+  Device performance tests remain exclusively with the user.
+
 - Fix pending Shizuku permission requests hanging when the server binder dies;
   invalidate cached user-service sessions and wake blocked binds on lifecycle loss.
 - Isolate callbacks per bind attempt so stale connection/disconnection events

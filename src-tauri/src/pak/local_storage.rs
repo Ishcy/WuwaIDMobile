@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
 
-use super::model::{Entry, FileStat, PakResult, MOUNT_FILENAME, PATCH_DIRECTORY};
+use super::model::{Entry, FileHashes, FileStat, PakResult, MOUNT_FILENAME, PATCH_DIRECTORY};
 use super::storage::Storage;
 
 /// Filesystem-backed adapter for isolated tests and local smoke fixtures only.
@@ -163,47 +163,40 @@ impl Storage for LocalStorage {
         }
     }
 
+    fn stat_many(&self, paths: &[String]) -> PakResult<Vec<FileStat>> {
+        paths.iter().map(|path| self.stat(path)).collect()
+    }
+
     fn read_text(&self, path: &str) -> PakResult<String> {
         let path_on_disk = self.checked_path(path, true)?;
         fs::read_to_string(&path_on_disk)
             .map_err(|error| format!("Could not read resource text {path}: {error}"))
     }
 
-    fn hash(&self, path: &str, algorithm: &str) -> PakResult<String> {
+    fn hashes(&self, path: &str, with_sha1: bool) -> PakResult<FileHashes> {
         let path_on_disk = self.checked_path(path, false)?;
-        let mut file = File::open(&path_on_disk)
-            .map_err(|error| format!("Could not open resource file {path} for hashing: {error}"))?;
+        let before = fs::symlink_metadata(&path_on_disk).map_err(|e| e.to_string())?;
+        if !before.is_file() {
+            return Err(format!("Resource is not a regular file: {path}"));
+        }
+        let mut file = File::open(&path_on_disk).map_err(|e| e.to_string())?;
+        let mut sha256 = Sha256::new();
+        let mut sha1 = with_sha1.then(Sha1::new);
         let mut buffer = [0u8; 64 * 1024];
-        let digest = match algorithm {
-            "sha1" => {
-                let mut hasher = Sha1::new();
-                loop {
-                    let count = file
-                        .read(&mut buffer)
-                        .map_err(|error| format!("Could not hash resource file {path}: {error}"))?;
-                    if count == 0 {
-                        break;
-                    }
-                    hasher.update(&buffer[..count]);
-                }
-                hex::encode(hasher.finalize())
-            }
-            "sha256" => {
-                let mut hasher = Sha256::new();
-                loop {
-                    let count = file
-                        .read(&mut buffer)
-                        .map_err(|error| format!("Could not hash resource file {path}: {error}"))?;
-                    if count == 0 {
-                        break;
-                    }
-                    hasher.update(&buffer[..count]);
-                }
-                hex::encode(hasher.finalize())
-            }
-            _ => return Err(format!("Unsupported hash algorithm: {algorithm}")),
-        };
-        Ok(digest)
+        let mut size = 0;
+        loop {
+            let count = file.read(&mut buffer).map_err(|e| e.to_string())?;
+            if count == 0 { break; }
+            sha256.update(&buffer[..count]);
+            if let Some(sha1) = &mut sha1 { sha1.update(&buffer[..count]); }
+            size += count as u64;
+        }
+        let after = fs::symlink_metadata(self.checked_path(path, false)?).map_err(|e| e.to_string())?;
+        if !after.is_file() || size != before.len() || size != after.len() || before.modified().ok() != after.modified().ok() {
+            return Err(format!("Resource changed while hashing: {path}"));
+        }
+        Ok(FileHashes { size, sha256: hex::encode(sha256.finalize()),
+            sha1: sha1.map(|hash| hex::encode(hash.finalize())) })
     }
 
     fn mkdir(&self, path: &str) -> PakResult<()> {

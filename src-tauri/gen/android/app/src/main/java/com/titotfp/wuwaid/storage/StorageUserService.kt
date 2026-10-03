@@ -2,9 +2,11 @@ package com.titotfp.wuwaid.storage
 
 import android.os.Bundle
 import android.os.ParcelFileDescriptor
+import java.io.File
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.Executors
 
 private val resourceVersion = Regex("""(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)""")
 private val ownedFiles = buildSet {
@@ -35,7 +37,46 @@ internal fun requireWritableTarget(
 }
 
 class StorageUserService : IStorageUserService.Stub() {
+  private val files = ResourceFiles(File(GAME_FILES))
+
+  @Synchronized
+  override fun metadata(operation: String?, first: String?, second: String?, requestId: Long): Bundle =
+    StorageTrace.phase(requestId, when (operation) {
+      "probe_root" -> "storage.probe_root"
+      "list" -> "storage.list"
+      "stat" -> "storage.stat"
+      "stat_many" -> "storage.stat_many"
+      "read_text" -> "storage.read_text"
+      "hashes" -> "storage.hashes"
+      else -> "storage.invalid"
+    }) {
+      try {
+        Bundle().apply {
+          putInt(KEY_EXIT_CODE, 0)
+          putByteArray(KEY_STDOUT, files.metadata(requireNotNull(operation), first, second))
+          putByteArray(KEY_STDERR, byteArrayOf())
+        }
+      } catch (error: Exception) {
+        failure(error.message ?: error.javaClass.simpleName)
+      }
+    }
+  private val outputExecutor = Executors.newFixedThreadPool(2) { runnable ->
+    Thread(runnable, "wuwaid-user-service-output").apply { isDaemon = true }
+  }
+
+  // Both stream readers must be available for the same process to avoid pipe deadlock.
+  @Synchronized
   override fun execute(
+    operation: String?,
+    first: String?,
+    second: String?,
+    input: ParcelFileDescriptor?,
+    requestId: Long
+  ): Bundle = StorageTrace.phase(requestId, "storage.mutation") {
+    executeCommand(operation, first, second, input)
+  }
+
+  private fun executeCommand(
     operation: String?,
     first: String?,
     second: String?,
@@ -64,8 +105,8 @@ class StorageUserService : IStorageUserService.Stub() {
     return try {
       val stdout = OutputCapture(process.inputStream, MAX_METADATA_BYTES)
       val stderr = OutputCapture(process.errorStream, MAX_ERROR_BYTES)
-      val stdoutThread = Thread(stdout, "wuwaid-user-service-stdout").apply { isDaemon = true; start() }
-      val stderrThread = Thread(stderr, "wuwaid-user-service-stderr").apply { isDaemon = true; start() }
+      val stdoutTask = outputExecutor.submit(stdout)
+      val stderrTask = outputExecutor.submit(stderr)
       val inputFailure = try {
         ParcelFileDescriptor.AutoCloseInputStream(inputFd).use { remoteInput ->
           process.outputStream.use { shellInput -> remoteInput.copyTo(shellInput, STREAM_BUFFER_BYTES) }
@@ -80,8 +121,8 @@ class StorageUserService : IStorageUserService.Stub() {
       }
 
       val exitCode = process.waitFor()
-      stdoutThread.join()
-      stderrThread.join()
+      stdoutTask.get()
+      stderrTask.get()
       val stdoutBytes = stdout.bytes()
       val stderrBytes = stderr.bytes()
       if (stdoutBytes.size > MAX_METADATA_BYTES) {
@@ -104,26 +145,17 @@ class StorageUserService : IStorageUserService.Stub() {
   }
 
   override fun destroy() {
+    outputExecutor.shutdownNow()
     System.exit(0)
   }
 
   private fun scriptFor(operation: String?, first: String?, second: String?): String {
     val op = operation ?: throw IllegalArgumentException("Storage operation is required")
     when (op) {
-      "root_readable", "root_writable", "force_stop" -> require(first == null && second == null) { "Unexpected storage arguments" }
-      "list" -> {
-        require(first != null && second == null) { "Directory path is required" }
-        validateRelative(first, allowEmpty = true)
-      }
-      "stat", "read_text", "remove" -> {
+      "force_stop" -> require(first == null && second == null) { "Unexpected storage arguments" }
+      "remove" -> {
         require(first != null && second == null) { "Resource path is required" }
-        val path = validateRelative(first, allowEmpty = false)
-        if (op == "remove") requireWritableTarget(path, allowPatchRoot = true)
-      }
-      "hash" -> {
-        require(first != null && second != null) { "Path and hash algorithm are required" }
-        validateRelative(first, allowEmpty = false)
-        require(second == "sha1" || second == "sha256") { "Unsupported hash algorithm" }
+        requireWritableTarget(validateRelative(first, allowEmpty = false), allowPatchRoot = true)
       }
       "mkdir" -> {
         require(first != null && second == null) { "Directory path is required" }
@@ -147,12 +179,6 @@ class StorageUserService : IStorageUserService.Stub() {
       else -> throw IllegalArgumentException("Unsupported storage operation")
     }
     return when (op) {
-      "root_readable" -> ROOT_READABLE_SCRIPT
-      "root_writable" -> ROOT_WRITABLE_SCRIPT
-      "list" -> LIST_SCRIPT
-      "stat" -> STAT_SCRIPT
-      "read_text" -> READ_TEXT_SCRIPT
-      "hash" -> HASH_SCRIPT
       "mkdir" -> MKDIR_SCRIPT
       "copy" -> COPY_SCRIPT
       "move_file" -> MOVE_SCRIPT
@@ -185,13 +211,13 @@ class StorageUserService : IStorageUserService.Stub() {
   }
 
   private class OutputCapture(private val stream: InputStream, private val limit: Int) : Runnable {
-    private val output = ByteArrayOutputStream(minOf(limit + 1, 8192))
+    private val output = ByteArrayOutputStream(minOf(limit + 1, 256))
     @Volatile private var failure: Exception? = null
 
     override fun run() {
       try {
         stream.use { input ->
-          val bytes = ByteArray(STREAM_BUFFER_BYTES)
+          val bytes = readBuffers.get()!!
           while (true) {
             val count = input.read(bytes)
             if (count < 0) break
@@ -211,11 +237,15 @@ class StorageUserService : IStorageUserService.Stub() {
   }
 
   companion object {
+    private const val GAME_FILES = "/storage/emulated/0/Android/data/com.kurogame.wutheringwaves.global/files"
     private const val RESOURCE_ROOT = "/storage/emulated/0/Android/data/com.kurogame.wutheringwaves.global/files/UE4Game/Client/Client/Saved/Resources"
     private const val MAX_PATH_LENGTH = 4096
     private const val MAX_METADATA_BYTES = 256 * 1024
     private const val MAX_ERROR_BYTES = 16 * 1024
     private const val STREAM_BUFFER_BYTES = 64 * 1024
+    private val readBuffers = object : ThreadLocal<ByteArray>() {
+      override fun initialValue(): ByteArray = ByteArray(STREAM_BUFFER_BYTES)
+    }
     private const val KEY_EXIT_CODE = "exitCode"
     private const val KEY_STDOUT = "stdout"
     private const val KEY_STDERR = "stderr"
@@ -225,21 +255,6 @@ EXPECTED_FILES=$(readlink -f -- "/storage/emulated/0/Android/data/com.kurogame.w
 [ -d "§EXPECTED_FILES" ] && [ "§ROOT" = "§EXPECTED_FILES/UE4Game/Client/Client/Saved/Resources" ] || { echo 'resource root is not the expected game directory' >&2; exit 1; }
 """)
 
-    private val ROOT_READABLE_SCRIPT = shell("""
-set -f
-ROOT=$(readlink -f -- "§1") || { echo 'resource root is unavailable' >&2; exit 1; }
-""") + ROOT_CHECK + shell("""
-[ -d "§ROOT" ] && [ -r "§ROOT" ] && [ -x "§ROOT" ] && ls -A "§ROOT" >/dev/null || { echo 'resource root is not readable' >&2; exit 1; }
-printf '1'
-""")
-
-    private val ROOT_WRITABLE_SCRIPT = shell("""
-set -f
-ROOT=$(readlink -f -- "§1") || { echo 'resource root is unavailable' >&2; exit 1; }
-""") + ROOT_CHECK + shell("""
-[ -d "§ROOT" ] && [ -w "§ROOT" ] && [ -x "§ROOT" ] || { echo 'resource root is not writable' >&2; exit 1; }
-printf '1'
-""")
 
     private val CHECK_PATH_FUNCTION = shell("""
 set -f
@@ -267,63 +282,6 @@ check_rel() {
 
     private fun checked(body: String): String = CHECK_PATH_FUNCTION + shell(body)
 
-    private val LIST_SCRIPT = checked("""
-REL="§2"
-check_rel "§REL" || exit 1
-DIR="§ROOT"
-[ -z "§REL" ] || DIR="§ROOT/§REL"
-[ -d "§DIR" ] || { echo 'resource path is not a directory' >&2; exit 1; }
-set +f
-for entry in "§DIR"/* "§DIR"/.[!.]* "§DIR"/..?*; do
-  [ -e "§entry" ] || [ -L "§entry" ] || continue
-  [ ! -L "§entry" ] || { echo 'symlinks are not allowed' >&2; exit 1; }
-  resolved=$(readlink -f -- "§entry") || { echo 'unable to resolve directory entry' >&2; exit 1; }
-  case "§resolved" in "§ROOT"|"§ROOT"/*) ;; *) echo 'directory entry escapes the game root' >&2; exit 1 ;; esac
-  name=§{entry##*/}
-  if [ -d "§entry" ]; then kind=1; else kind=0; fi
-  printf '%s\000%s\000' "§name" "§kind"
-done
-""")
-
-    private val STAT_SCRIPT = checked("""
-REL="§2"
-check_rel "§REL" || exit 1
-TARGET="§ROOT"
-[ -z "§REL" ] || TARGET="§ROOT/§REL"
-if [ -d "§TARGET" ]; then
-  printf 'D\t0'
-elif [ -f "§TARGET" ]; then
-  size=$(stat -c %s "§TARGET") || { echo 'unable to stat resource file' >&2; exit 1; }
-  printf 'F\t%s' "§size"
-else
-  printf 'N\t0'
-fi
-""")
-
-    private val READ_TEXT_SCRIPT = checked("""
-REL="§2"
-check_rel "§REL" || exit 1
-TARGET="§ROOT/§REL"
-[ -f "§TARGET" ] || { echo 'resource is not a regular file' >&2; exit 1; }
-size=$(wc -c < "§TARGET") || { echo 'unable to read resource size' >&2; exit 1; }
-set -- §size
-[ "§{1:-0}" -le 262144 ] || { echo 'text resource exceeds the 256 KiB limit' >&2; exit 1; }
-cat "§TARGET"
-""")
-
-    private val HASH_SCRIPT = checked("""
-REL="§2"
-ALGORITHM="§3"
-check_rel "§REL" || exit 1
-TARGET="§ROOT/§REL"
-[ -f "§TARGET" ] || { echo 'resource is not a regular file' >&2; exit 1; }
-case "§ALGORITHM" in
-  sha1) result=$(sha1sum "§TARGET") || { echo 'sha1sum failed' >&2; exit 1; } ;;
-  sha256) result=$(sha256sum "§TARGET") || { echo 'sha256sum failed' >&2; exit 1; } ;;
-  *) echo 'unsupported hash algorithm' >&2; exit 1 ;;
-esac
-printf '%s' "§{result%% *}"
-""")
 
     private val MKDIR_SCRIPT = checked("""
 REL="§2"

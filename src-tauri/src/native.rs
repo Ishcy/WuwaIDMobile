@@ -9,13 +9,10 @@ use serde::Serialize;
 use tauri::Emitter;
 use tauri::{AppHandle, Manager};
 
-use crate::pak::model::{InstallStatus, PakResult, Release, GAME_PACKAGE};
+use crate::pak::model::{InstallStatus, PakResult, Release, ResourceLayout, GAME_PACKAGE};
+use crate::trace::{Request, Span};
 #[cfg(target_os = "android")]
-use crate::pak::{
-    installer,
-    model::{DeviceProbe, ResourceLayout},
-    release, uid,
-};
+use crate::pak::{installer, model::DeviceProbe, release, uid};
 
 #[derive(Default)]
 pub struct NativeState {
@@ -169,7 +166,12 @@ fn check_compatibility(
     Ok(())
 }
 
-fn load_dashboard(app: &AppHandle, refresh_release: bool) -> PakResult<Dashboard> {
+fn load_dashboard(
+    app: &AppHandle,
+    refresh_release: bool,
+    completed: Option<(ResourceLayout, InstallStatus)>,
+) -> PakResult<Dashboard> {
+    let _response = Span::new("dashboard.response");
     let release_result = if refresh_release {
         fetch_release(app).map(Some)
     } else {
@@ -181,6 +183,7 @@ fn load_dashboard(app: &AppHandle, refresh_release: bool) -> PakResult<Dashboard
     };
     #[cfg(not(target_os = "android"))]
     {
+        let _ = completed;
         Ok(Dashboard {
             mode: "native", platform_supported: false, storage_writable: false,
             blocker: Some(match release_error {
@@ -205,13 +208,22 @@ fn load_dashboard(app: &AppHandle, refresh_release: bool) -> PakResult<Dashboard
         };
         let mut patch = empty_status();
         if probe.shizuku_running && probe.shizuku_granted && probe.root_readable {
-            match installer::discover(&*storage) {
+            // A successful transaction already returned a fully inspected terminal state.
+            // This is scoped to this response; explicit refresh still discovers and hashes.
+            let (layout, status) = match completed {
+                Some((layout, status)) => (Ok(layout), Some(status)),
+                None => (installer::discover(&*storage), None),
+            };
+            match layout {
                 Ok(layout) => {
                     resource = Resource {
                         ready: true,
                         version: layout.version.clone(),
                     };
-                    match installer::inspect(&*storage, &layout) {
+                    match status
+                        .map(Ok)
+                        .unwrap_or_else(|| installer::inspect(&*storage, &layout))
+                    {
                         Ok(status) => patch = status,
                         Err(error) => {
                             patch.message = Some(error.clone());
@@ -251,8 +263,28 @@ fn load_dashboard(app: &AppHandle, refresh_release: bool) -> PakResult<Dashboard
 }
 
 #[tauri::command]
-pub async fn wuwa_load(app: AppHandle) -> PakResult<Dashboard> {
-    tauri::async_runtime::spawn_blocking(move || load_dashboard(&app, true))
+pub fn wuwa_trace_enabled() -> bool { cfg!(debug_assertions) }
+
+#[tauri::command]
+pub fn wuwa_ui_trace(request_id: u64, event: String, frontend_us: u64) -> PakResult<()> {
+    if !cfg!(debug_assertions) { return Ok(()); }
+    let _request = Request::enter(request_id);
+    match event.as_str() {
+        "busy_start" => crate::trace::mark("ui.busy", "begin", frontend_us),
+        "busy_end" => crate::trace::mark("ui.busy", "end", frontend_us),
+        "response" => crate::trace::mark("ui.response", "received", frontend_us),
+        _ => return Err("Unsupported trace event".into()),
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn wuwa_load(app: AppHandle, request_id: u64) -> PakResult<Dashboard> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let _request = Request::enter(request_id);
+        let _load = Span::new("dashboard.load");
+        load_dashboard(&app, true, None)
+    })
         .await
         .map_err(|e| e.to_string())?
 }
@@ -262,10 +294,13 @@ pub async fn wuwa_run(
     app: AppHandle,
     operation: String,
     uid_text: Option<String>,
+    request_id: u64,
 ) -> PakResult<Dashboard> {
     let guard = BusyGuard::acquire(Arc::clone(app.state::<Arc<NativeState>>().inner()))?;
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = guard;
+        let _request = Request::enter(request_id);
+        let _run = Span::new("operation");
         #[cfg(not(target_os = "android"))]
         {
             let _ = (&app, operation, uid_text);
@@ -274,8 +309,11 @@ pub async fn wuwa_run(
         #[cfg(target_os = "android")]
         {
             let storage = bridge(&app);
-            match operation.as_str() {
-                "request_permission" | "launch_game" => storage.control(&operation)?,
+            let completed = match operation.as_str() {
+                "request_permission" | "launch_game" => {
+                    storage.control(&operation)?;
+                    None
+                }
                 "install" | "repair" | "uninstall" | "apply_uid" | "restore_uid" => {
                     let probe = storage.probe()?;
                     physical_prerequisites(&probe)?;
@@ -305,10 +343,10 @@ pub async fn wuwa_run(
                     let progress = |value| {
                         let _ = app.emit("wuwa-progress", value);
                     };
-                    if operation == "uninstall" {
-                        installer::uninstall(&*storage, &layout, &progress)?;
+                    let completed = if operation == "uninstall" {
+                        installer::uninstall(&*storage, &layout, &progress)?
                     } else if operation == "repair" && status.recovery_pending {
-                        installer::recover(&*storage, &layout, &progress)?;
+                        installer::recover(&*storage, &layout, &progress)?
                     } else {
                         let release = fetch_release(&app)?;
                         check_compatibility(&probe, &layout, &release)?;
@@ -326,7 +364,7 @@ pub async fn wuwa_run(
                                 &pak,
                                 custom_uid.as_deref(),
                                 &progress,
-                            )?;
+                            )?
                         } else {
                             installer::install(
                                 &*storage,
@@ -335,13 +373,14 @@ pub async fn wuwa_run(
                                 &pak,
                                 custom_uid.as_deref(),
                                 &progress,
-                            )?;
+                            )?
                         }
-                    }
+                    };
+                    Some((layout, completed))
                 }
                 _ => return Err("Operasi tidak dikenal.".into()),
-            }
-            load_dashboard(&app, false)
+            };
+            load_dashboard(&app, false, completed)
         }
     })
     .await
@@ -371,9 +410,11 @@ pub async fn wuwa_open_setup(app: AppHandle, target: String) -> PakResult<()> {
 }
 
 #[tauri::command]
-pub async fn wuwa_diagnostics(app: AppHandle) -> PakResult<Diagnostics> {
+pub async fn wuwa_diagnostics(app: AppHandle, request_id: u64) -> PakResult<Diagnostics> {
     tauri::async_runtime::spawn_blocking(move || {
-        let dashboard = load_dashboard(&app, false)?;
+        let _request = Request::enter(request_id);
+        let _phase = Span::new("diagnostics");
+        let dashboard = load_dashboard(&app, false, None)?;
         let content = serde_json::to_string_pretty(&serde_json::json!({
             "mock": false, "backend": if cfg!(target_os = "android") { "android-shizuku" } else { "desktop-unsupported" }, "dashboard": dashboard,
         })).map_err(|e| e.to_string())?;

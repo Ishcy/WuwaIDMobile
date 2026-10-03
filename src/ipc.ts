@@ -11,13 +11,17 @@ import type {
 // Decide before importing mockIPC: mocks themselves populate Tauri's window internals.
 const native = isTauri();
 const progressListeners = new Set<(progress: Progress) => void>();
+let recording = false;
+let nextRequest = 0;
+let busyRequest: number | undefined;
 function progressReceived(progress: Progress) {
   for (const listener of progressListeners) listener(progress);
 }
 const ready = native
-  ? listen<Progress>("wuwa-progress", (event) =>
-      progressReceived(event.payload),
-    )
+  ? Promise.all([
+      listen<Progress>("wuwa-progress", (event) => progressReceived(event.payload)),
+      invoke<boolean>("wuwa_trace_enabled").then((enabled) => { recording = enabled; }),
+    ])
   : import("./mock-ipc").then((mock) =>
       mock.subscribeProgress(progressReceived),
     );
@@ -27,10 +31,32 @@ async function command<T>(
   args?: Record<string, unknown>,
 ): Promise<T> {
   await ready;
-  return invoke<T>(name, args);
+  const requestId = busyRequest ?? ++nextRequest;
+  const result = await invoke<T>(name, { ...args, requestId });
+  if (recording) await uiTrace(requestId, "response");
+  return result;
+}
+
+async function uiTrace(requestId: number, event: "busy_start" | "busy_end" | "response", startedUs?: number) {
+  if (!recording) return;
+  const frontendUs = startedUs ?? Math.round(performance.now() * 1000);
+  performance.mark(`wuwaid:${requestId}:${event}`, { startTime: frontendUs / 1000 });
+  // Recording must never turn a completed operation into a failed one.
+  await invoke<void>("wuwa_ui_trace", { requestId, event, frontendUs }).catch(() => {});
 }
 
 export const api = {
+  async beginBusy() {
+    const startedUs = recording ? Math.round(performance.now() * 1000) : undefined;
+    await ready;
+    busyRequest = ++nextRequest;
+    await uiTrace(busyRequest, "busy_start", startedUs);
+  },
+  async endBusy() {
+    const requestId = busyRequest;
+    busyRequest = undefined;
+    if (requestId !== undefined) await uiTrace(requestId, "busy_end");
+  },
   load: () => command<Dashboard>("wuwa_load"),
   setScenario(scenario: Scenario) {
     if (native)

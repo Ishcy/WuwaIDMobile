@@ -47,6 +47,7 @@ pub fn validate_text(value: &str) -> PakResult<&str> {
 // The caller verifies the release's original size and SHA-256 before deriving.
 // Only a private temporary database is edited; all other PAK entries are preserved.
 pub fn prepare(source: &Path, text: &str) -> PakResult<DerivedPak> {
+    let _phase = crate::trace::Span::new("uid.prepare");
     let text = validate_text(text)?;
     let parent = source
         .parent()
