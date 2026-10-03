@@ -33,8 +33,7 @@ export function renderCustomize(state: UiState): string {
   if (!d.uidAvailable)
     return `<section class="page-heading"><h1>Kustomisasi</h1></section><section class="card unavailable-studio"><h2>Memerlukan Android</h2><p class="muted">UID kustom memerlukan Android dan Shizuku.</p><button class="text-button" data-section="home">Beranda ${icon("arrow")}</button></section>`;
   const status = readiness(d);
-  const canCustomize =
-    !state.busy && d.patch.installed && d.patch.healthy && status.ready;
+  const canCustomize = !state.busy && status.ready;
   const draft = state.uidDraft.trim();
   const original = d.uid.original || "UID asli game";
   const current = d.uid.custom ?? original;
@@ -43,14 +42,9 @@ export function renderCustomize(state: UiState): string {
     draft.length > 0 &&
     draft.length <= UID_MAX_LENGTH &&
     draft !== current;
-  const gate = !status.ready
-    ? status.detail
-    : !d.patch.installed
-      ? "Pasang terjemahan terlebih dahulu."
-      : "";
+  const gate = !status.ready ? status.detail : "";
 
   return `<section class="page-heading"><h1>Kustomisasi</h1><p>${d.mode === "mock" ? "Simulasi tampilan UID." : "Tampilan UID."} UID akun tetap.</p></section>
-    <div class="uid-grid">
       <section class="card uid-editor" aria-labelledby="uid-title">
         <div class="card-header"><h2 id="uid-title">UID kustom</h2>${icon("customize")}</div>
         ${gate ? `<p class="muted uid-gate">${escapeHtml(gate)}</p>` : ""}
@@ -64,12 +58,7 @@ export function renderCustomize(state: UiState): string {
           <div class="info-row"><dt>Bawaan</dt><dd>${escapeHtml(original)}</dd></div>
           <div class="info-row"><dt>Aktif</dt><dd id="uid-active">${escapeHtml(current)}</dd></div>
         </dl>
-      </section>
-      <section class="uid-preview-card" aria-labelledby="uid-preview-title">
-        <div class="preview-heading"><h2 id="uid-preview-title">Pratinjau</h2></div>
-        <div class="uid-preview-stage"><span class="uid-preview-label">UID</span><output id="uid-preview" for="uid-input">${escapeHtml(draft || original)}</output></div>
-      </section>
-    </div>`;
+      </section>`;
 }
 
 export function renderTools(state: UiState): string {

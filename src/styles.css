@@ -111,8 +111,6 @@ svg, .icon { flex-shrink: 0; }
 .package-facts > div { display: flex; flex-direction: column; gap: 8px; }
 .package-facts span { font-size: 11px; color: var(--muted); }
 .package-facts strong { font-size: 13px; font-weight: 550; overflow-wrap: anywhere; }
-.safety-note { font-size: 11px; line-height: 1.6; color: var(--muted); display: flex; align-items: flex-start; gap: 7px; margin-top: 18px; }
-.safety-note .icon { width: 14px; height: 14px; margin-top: 2px; }
 .icon-btn { display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid var(--border); border-radius: 50%; color: var(--text); background: transparent; flex-shrink: 0; }
 .icon-btn:hover { background: var(--surface-soft); }
 .icon-btn .icon { width: 17px; height: 17px; }
@@ -129,7 +127,7 @@ svg, .icon { flex-shrink: 0; }
 .device-check .icon { width: 16px; height: 16px; }
 .footer { border-top: 1px solid var(--border); padding: 24px 0 32px; margin-top: 40px; color: var(--muted); font-size: 10px; }
 .mobile-nav { display: none; }
-.uid-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+.uid-editor { max-width: 640px; }
 .uid-gate { margin-bottom: 22px; }
 .field-label { display: block; font-size: 13px; font-weight: 550; margin-bottom: 10px; }
 .uid-input, .select { width: 100%; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text); padding: 14px; min-height: 48px; }
@@ -144,10 +142,6 @@ svg, .icon { flex-shrink: 0; }
 .info-row dd { margin: 0; overflow-wrap: anywhere; }
 .info-row dd code { display: block; color: var(--muted); font-size: 10px; margin-top: 3px; }
 .uid-info { margin-top: 22px; }
-.preview-heading { padding: 0 0 18px; }
-.uid-preview-stage { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 16px; min-height: 210px; border-radius: 16px; background: var(--accent-soft); border: 1px solid var(--border); padding: 30px; }
-.uid-preview-label { font-size: 12px; color: var(--muted); }
-#uid-preview { font-family: ui-monospace, monospace; font-size: 25px; color: var(--accent-text); overflow-wrap: anywhere; text-align: center; max-width: 100%; }
 .unavailable-studio h2 { margin-bottom: 14px; }
 .unavailable-studio .text-button { margin-top: 16px; }
 .health-banner { display: flex; align-items: center; gap: 18px; padding: 24px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; margin-bottom: 24px; }
@@ -189,7 +183,7 @@ dialog .actions { justify-content: flex-end; }
 .startup-error p { margin: 20px 0; overflow-wrap: anywhere; }
 
 /* Short, one-shot motion; no layout tweening or decorative loops. */
-:root, .app-header, .card, .health-banner, .uid-preview-stage, .mobile-nav,
+:root, .app-header, .card, .health-banner, .mobile-nav,
 dialog, .progress-card, .error-banner {
   transition: background-color 180ms ease-out, color 180ms ease-out, border-color 180ms ease-out;
 }
@@ -235,7 +229,7 @@ dialog[open]::backdrop { animation: fade-in 160ms ease-out; }
   .page-heading h1 { font-size: 28px; letter-spacing: -.8px; }
   .page-heading p { font-size: 12px; }
   .home-heading { flex-direction: column; align-items: flex-start; gap: 20px; }
-  .home-grid, .uid-grid, .tools-detail-grid { grid-template-columns: 1fr; gap: 18px; }
+  .home-grid, .tools-detail-grid { grid-template-columns: 1fr; gap: 18px; }
   .card { padding: 22px; }
   .health-banner { padding: 22px; gap: 14px; }
   .health-banner h2 { font-size: 17px; }

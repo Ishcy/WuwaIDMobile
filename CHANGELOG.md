@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- Fix pending Shizuku permission requests hanging when the server binder dies;
+  invalidate cached user-service sessions and wake blocked binds on lifecycle loss.
+- Isolate callbacks per bind attempt so stale connection/disconnection events
+  cannot replace a newer session; clean failed, timed-out, and destroyed sessions.
+- Require Shizuku server API 12+, handle permission rationale with actionable
+  guidance, and replace API-26 cache symlink checks with API-21 `Os.lstat`.
+- Verify Kotlin bridge behavior using a host-adapted process/pipe smoke,
+  Android APK build/signature, packaged provider manifest, and 20 Rust tests.
+  Bridge `NewApi` lint errors are resolved; existing TV manifest lint errors remain.
+  Real-device Shizuku/Binder/SELinux verification was unavailable without ADB.
+
+- Remove the installation safety copy and custom UID preview, including its
+  update handlers and unused styles; keep a single-column UID editor.
+- Allow custom UID Apply before a manual translation install: reuse the verified
+  release/cache and transactional installer to install translation plus UID in
+  one operation. Keep device, permission, release, resource, and recovery gates.
+  Align browser simulation with the native fresh-install transition.
+- Verify fresh/already-installed Apply and Reset in browser and a disk-backed
+  PAK v12/SQLite smoke fixture; build and signature-check the ARM64 debug APK.
+  No connected ADB device was available to repeat Android gameplay verification.
+
 - Implement native Android custom UID and Reset using verified release PAKs,
   SQLite updates to the three launcher UID targets, and verified PAK v12 repacking.
   Preserve other translations, original release integrity, and official game files.
@@ -47,13 +68,13 @@
   metadata, transactional install/repair/uninstall, and exact snapshot recovery
   across resource updates without requiring release metadata.
 - Use native Tauri IPC and progress events in the shell; retain browser-only
-  simulation and custom UID previews, with explicit desktop platform limits.
+  simulation and custom UID actions, with explicit desktop platform limits.
 
 - Build the Indonesian Beranda, Kustomisasi, and Perawatan frontend with responsive
   desktop/sidebar and mobile/bottom navigation.
 - Add explicitly simulated Tauri IPC for device scenarios, translation install and
   repair, permission flow, custom UID display, and JSON diagnostics; persist mock state.
-- Replace font customization with custom UID input, live preview, apply/restore
+- Replace font customization with custom UID input, apply/restore
   actions, and persisted display state without changing the account UID.
 - Add operation progress and gating, and uninstall confirmation with UID restoration.
 - Remove the unused greeting form and Rust greeting command.

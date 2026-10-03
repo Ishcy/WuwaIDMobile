@@ -9,6 +9,8 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.IBinder
 import android.os.ParcelFileDescriptor
+import android.system.Os
+import android.system.OsConstants
 import androidx.appcompat.app.AppCompatActivity
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
@@ -20,7 +22,6 @@ import java.io.File
 import java.io.InputStream
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
-import java.nio.file.Files
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.ExecutorService
@@ -55,15 +56,15 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
   private val destroyed = AtomicBoolean(false)
   @Volatile private var userService: IStorageUserService? = null
   private var serviceBinding = false
-  private var serviceBound = false
   private var serviceReady: CountDownLatch? = null
   private val userServiceArgs = Shizuku.UserServiceArgs(
     ComponentName(activity.packageName, StorageUserService::class.java.name)
   ).daemon(false).tag("wuwaid-storage").version(1).processNameSuffix("wuwaid-storage")
-  private val serviceConnection = object : ServiceConnection {
+  private var serviceConnection: ServiceConnection? = null
+  private fun newServiceConnection() = object : ServiceConnection {
     override fun onServiceConnected(name: ComponentName, binder: IBinder) {
       synchronized(serviceLock) {
-        if (!destroyed.get()) {
+        if (!destroyed.get() && serviceConnection === this && serviceBinding) {
           userService = IStorageUserService.Stub.asInterface(binder)
           serviceBinding = false
           serviceReady?.countDown()
@@ -73,10 +74,13 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
 
     override fun onServiceDisconnected(name: ComponentName) {
       synchronized(serviceLock) {
-        userService = null
-        serviceBinding = false
-        serviceBound = false
-        serviceReady?.countDown()
+        if (serviceConnection === this) {
+          userService = null
+          serviceBinding = false
+          serviceConnection = null
+          serviceReady?.countDown()
+          serviceReady = null
+        }
       }
     }
   }
@@ -97,9 +101,20 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
       }
     }
   }
+  private val binderDeadListener = Shizuku.OnBinderDeadListener {
+    pendingPermission.getAndSet(null)?.reject("Shizuku stopped while permission was being requested; start Shizuku and try again")
+    synchronized(serviceLock) {
+      userService = null
+      serviceBinding = false
+      serviceConnection = null
+      serviceReady?.countDown()
+      serviceReady = null
+    }
+  }
 
   init {
     Shizuku.addRequestPermissionResultListener(permissionListener)
+    Shizuku.addBinderDeadListener(binderDeadListener)
   }
 
   @Command
@@ -137,20 +152,22 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
   }
 
   override fun onDestroy(activity: AppCompatActivity) {
-    destroyed.set(true)
+    if (!destroyed.compareAndSet(false, true)) return
     pendingPermission.getAndSet(null)?.reject("Android storage plugin was destroyed")
     Shizuku.removeRequestPermissionResultListener(permissionListener)
-    val shouldUnbind = synchronized(serviceLock) {
-      val wasBound = serviceBound || serviceBinding
-      serviceBound = false
+    Shizuku.removeBinderDeadListener(binderDeadListener)
+    val connection = synchronized(serviceLock) {
+      val connection = serviceConnection
+      serviceConnection = null
       serviceBinding = false
       userService = null
       serviceReady?.countDown()
-      wasBound
+      serviceReady = null
+      connection
     }
-    if (shouldUnbind) {
+    if (connection != null) {
       try {
-        Shizuku.unbindUserService(userServiceArgs, serviceConnection, true)
+        Shizuku.unbindUserService(userServiceArgs, connection, true)
       } catch (_: Exception) {
       }
     }
@@ -159,31 +176,40 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
 
   private fun requestPermission(invoke: Invoke) {
     try {
-      if (!Shizuku.pingBinder()) {
-        invoke.reject("Shizuku is not running; start it from the Shizuku app first")
-        return
-      }
+      requireShizuku()
       if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
         invoke.resolve()
         return
       }
-      if (!pendingPermission.compareAndSet(null, invoke)) {
-        invoke.reject("A Shizuku permission request is already in progress")
+      if (Shizuku.shouldShowRequestPermissionRationale()) {
+        invoke.reject("Izin ditolak. Buka Shizuku dan izinkan WuwaIDMobile di daftar aplikasi.")
         return
       }
+    } catch (error: Exception) {
+      invoke.reject("Unable to request Shizuku permission: ${error.message ?: error.javaClass.simpleName}")
+      return
+    }
+    if (!pendingPermission.compareAndSet(null, invoke)) {
+      invoke.reject("A Shizuku permission request is already in progress")
+      return
+    }
+    try {
       activity.runOnUiThread {
         try {
           if (pendingPermission.get() === invoke) {
+            requireShizuku()
             Shizuku.requestPermission(REQUEST_PERMISSION)
           }
         } catch (error: Exception) {
-          pendingPermission.compareAndSet(invoke, null)
-          invoke.reject("Unable to request Shizuku permission: ${error.message ?: error.javaClass.simpleName}")
+          if (pendingPermission.compareAndSet(invoke, null)) {
+            invoke.reject("Unable to request Shizuku permission: ${error.message ?: error.javaClass.simpleName}")
+          }
         }
       }
     } catch (error: Exception) {
-      pendingPermission.compareAndSet(invoke, null)
-      invoke.reject("Unable to request Shizuku permission: ${error.message ?: error.javaClass.simpleName}")
+      if (pendingPermission.compareAndSet(invoke, null)) {
+        invoke.reject("Unable to request Shizuku permission: ${error.message ?: error.javaClass.simpleName}")
+      }
     }
   }
 
@@ -431,7 +457,7 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
     // Android resolves the app data directory through /data/user/0, so only the
     // canonical location is compared; the payload itself must not be a symlink.
     if (canonical == cacheRoot || !canonical.path.startsWith(cacheRoot.path + File.separator) ||
-      Files.isSymbolicLink(source.toPath()) || !canonical.isFile
+      OsConstants.S_ISLNK(Os.lstat(source.path).st_mode) || !canonical.isFile
     ) {
       throw SecurityException("write_from_file source must be a regular, non-symlink file inside this app's cache directory")
     }
@@ -451,14 +477,22 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
       .toString()
   }
 
-  private fun connectedUserService(): IStorageUserService {
+  private fun requireShizuku() {
     if (destroyed.get()) throw IllegalStateException("Android storage plugin was destroyed")
-    if (!Shizuku.pingBinder()) throw IllegalStateException("Shizuku is not running")
+    if (!Shizuku.pingBinder()) throw IllegalStateException("Shizuku is not running; start it from the Shizuku app first")
+    if (Shizuku.isPreV11() || Shizuku.getVersion() < 12) {
+      throw IllegalStateException("Shizuku API 12 or newer is required; update Shizuku")
+    }
+  }
+
+  private fun connectedUserService(): IStorageUserService {
+    requireShizuku()
     if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
       throw SecurityException("Shizuku permission has not been granted")
     }
 
     var startBinding = false
+    val connection: ServiceConnection
     val ready = synchronized(serviceLock) {
       if (destroyed.get()) throw IllegalStateException("Android storage plugin was destroyed")
       userService?.takeIf { it.asBinder().isBinderAlive }?.let { return it }
@@ -466,22 +500,33 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
       if (!serviceBinding) {
         serviceBinding = true
         serviceReady = CountDownLatch(1)
+        serviceConnection = newServiceConnection()
         startBinding = true
       }
+      connection = serviceConnection ?: throw IllegalStateException("Shizuku service connection is not available")
       serviceReady ?: throw IllegalStateException("Shizuku user service is not available")
     }
 
     if (startBinding) {
       try {
         synchronized(serviceLock) {
-          if (destroyed.get()) throw IllegalStateException("Android storage plugin was destroyed")
-          Shizuku.bindUserService(userServiceArgs, serviceConnection)
-          serviceBound = true
+          if (destroyed.get() || serviceConnection !== connection) {
+            throw IllegalStateException("Shizuku service binding was cancelled")
+          }
+          Shizuku.bindUserService(userServiceArgs, connection)
         }
       } catch (error: Exception) {
         synchronized(serviceLock) {
-          serviceBinding = false
-          serviceReady?.countDown()
+          if (serviceConnection === connection) {
+            serviceBinding = false
+            serviceConnection = null
+            serviceReady?.countDown()
+            serviceReady = null
+          }
+        }
+        try {
+          Shizuku.unbindUserService(userServiceArgs, connection, true)
+        } catch (_: Exception) {
         }
         throw IllegalStateException("Unable to bind the Shizuku storage service: ${error.message ?: error.javaClass.simpleName}", error)
       }
@@ -490,24 +535,25 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
     if (!ready.await(SERVICE_CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
       var shouldUnbind = false
       synchronized(serviceLock) {
-        userService?.takeIf { it.asBinder().isBinderAlive }?.let { return it }
-        userService = null
-        if (serviceReady === ready) {
-          shouldUnbind = serviceBound
+        if (serviceConnection === connection) {
+          userService?.takeIf { it.asBinder().isBinderAlive }?.let { return it }
+          userService = null
+          shouldUnbind = true
           serviceBinding = false
-          serviceBound = false
+          serviceConnection = null
           serviceReady = null
         }
       }
       if (shouldUnbind) {
         try {
-          Shizuku.unbindUserService(userServiceArgs, serviceConnection, true)
+          Shizuku.unbindUserService(userServiceArgs, connection, true)
         } catch (_: Exception) {
         }
       }
       throw IllegalStateException("Timed out waiting for the Shizuku storage service")
     }
     return synchronized(serviceLock) {
+      if (serviceConnection !== connection) throw IllegalStateException("Shizuku storage service disconnected")
       userService?.takeIf { it.asBinder().isBinderAlive }
         ?: throw IllegalStateException("Shizuku storage service disconnected")
     }

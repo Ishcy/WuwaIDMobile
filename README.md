@@ -12,8 +12,8 @@ referensi. Tiga layar:
 
 - **Beranda:** status game, Shizuku, resource, dan rilis; unduh/pasang ulang
   terjemahan dengan progres dan pemeriksaan kompatibilitas.
-- **Kustomisasi:** UID kustom native di Android dan pratinjau mock di browser,
-  dengan penerapan dan Reset. Hanya teks tampilan yang berubah, bukan UID akun.
+- **Kustomisasi:** UID kustom native di Android dan simulasi di browser, dengan
+  penerapan dan Reset tanpa pratinjau. Hanya teks tampilan yang berubah, bukan UID akun.
 - **Perawatan:** pemeriksaan ulang, pemulihan transaksi, ekspor diagnostik JSON,
   dan penghapusan berkas milik aplikasi dengan konfirmasi.
 - Navigasi horizontal di desktop dan dock bawah pada layar Android.
@@ -97,6 +97,35 @@ Bridge Kotlin menggunakan **Shizuku UserService + AIDL**, bukan API private
 atau buffer sebesar PAK. Guard di aplikasi dan service privileged membatasi
 mutasi ke path WuwaID pada versi numerik serta menolak traversal/symlink.
 
+Shizuku harus menyediakan server API **12 atau lebih baru**. Permintaan izin
+bersifat asinkron: binder mati atau plugin dihancurkan menolak permintaan yang
+tertunda, bukan meninggalkan UI menunggu. Penolakan yang memerlukan perubahan
+izin manual mengarahkan pengguna ke daftar aplikasi di Shizuku.
+Setiap bind mempunyai callback sendiri; callback sesi lama tidak dapat mengubah
+sesi baru. Binder mati, disconnect, gagal bind, timeout 15 detik, dan destroy
+mengosongkan sesi serta melepas penunggu. Pemeriksaan symlink cache memakai
+`Os.lstat` (API 21), sehingga tidak memerlukan API 26 pada aplikasi `minSdk 24`.
+Provider, layanan `IBinder`, dan kode AIDL destroy mengikuti
+[kontrak resmi Shizuku](https://github.com/RikkaApps/Shizuku-API#userservice).
+
+**Audit WM-21 (2026-10-03):** permintaan izin yang menggantung saat binder mati
+direproduksi gagal-sebelum/lulus-sesudah memakai sumber Kotlin bridge di JVM host.
+Smoke berikutnya mencakup izin, restart, callback lama, kegagalan bind, timeout,
+destroy saat menunggu bind, stream 8 MiB beserta SHA-1/SHA-256, copy/rename,
+penolakan overwrite, traversal/symlink, shell metacharacters, dan batas teks/list.
+Empat berkas resource fixture tetap identik. Smoke memakai adapter tipis untuk
+Android/Tauri/Shizuku; proses dan pipe berjalan di host, dengan `/system/bin/sh`
+serta root resource dipetakan ke shell/direktori sementara host. Ini **bukan**
+verifikasi IPC binder, UID shell/root, SELinux, atau izin storage Android nyata.
+
+Build frontend, APK debug ARM64, signature v2, serta 20 tes Rust lulus.
+Manifest APK hasil build memuat provider Shizuku yang dijaga permission dan
+deklarasi API dari dependensi. Dua error `NewApi` pada bridge hilang dari lint;
+full lint masih gagal pada `MissingTvBanner` dan `ImpliedTouchscreenHardware`
+dari deklarasi Android TV template yang tidak diubah dalam audit ini.
+ADB dan mDNS tidak menemukan perangkat; perbaikan lifecycle ini belum diuji
+di perangkat. Bukti perangkat pada bagian berikut berasal dari pengujian sebelumnya.
+
 **Verifikasi:** unduhan PAK asli dan siklus install/repair/uninstall diuji pada
 filesystem terisolasi. Regresi mount memeriksa resolusi berkas PAK/signature,
 hash, perbaikan/penghapusan format lama, dan rollback snapshot.
@@ -112,8 +141,15 @@ konten terjemahan.
 
 ### Android: UID kustom
 
-**Kustomisasi → Terapkan** memerlukan terjemahan terpasang dan sehat. Input
-teks/angka maksimal 32 unit UTF-16 (sama dengan batas input browser), tanpa
+**Kustomisasi → Terapkan** tidak memerlukan pemasangan terjemahan manual
+terlebih dahulu. Saat belum terpasang, backend mengambil PAK rilis terverifikasi
+(atau cache yang diverifikasi ulang), menyiapkan UID, lalu memasang terjemahan
+beserta UID dalam satu transaksi. Saat sudah terpasang, transaksi yang sama
+mengganti pilihan UID. Game, izin Shizuku, resource, dan rilis kompatibel tetap
+wajib siap; pemasangan rusak atau transaksi tertunda harus diperbaiki lewat
+**Perawatan**.
+
+Input teks/angka maksimal 32 unit UTF-16 (sama dengan batas input browser), tanpa
 karakter kontrol atau pemisah baris. Spasi awal/akhir dipangkas; input kosong
 ditolak, bukan digunakan untuk menyembunyikan UID.
 
@@ -137,8 +173,8 @@ berkas milik aplikasi. Pemulihan transaksi tidak memerlukan repack atau jaringan
 
 Aplikasi tidak membaca nomor UID akun. Android menampilkan **UID asli game**
 sebagai label bawaan; nomor contoh hanya dipakai oleh mock browser.
-SQLite dan pengolahan PAK berjalan di cache privat Rust; bridge Shizuku tidak
-diubah dan tetap hanya menulis berkas WuwaID yang dijaga oleh aturan kepemilikan.
+SQLite dan pengolahan PAK berjalan di cache privat Rust; bridge Shizuku hanya
+menulis berkas WuwaID yang dijaga oleh aturan kepemilikan.
 
 **Verifikasi perangkat (2026-10-03):** APK debug ARM64 dipasang pada SM-A525F
 tanpa menghapus data aplikasi, menggunakan rilis `v3.7.1-id.1`.
@@ -154,6 +190,17 @@ Artefak WuwaID yang dimiliki aplikasi dikecualikan dari baseline tersebut.
 **Batas verifikasi:** panel teman/profil tidak diuji terpisah; pengujian ini tidak
 memverifikasi seluruh konten terjemahan.
 
+**Verifikasi alur dinamis WM-18–WM-20 (2026-10-03):** smoke browser desktop
+dan mobile mencakup penerapan dari kondisi belum terpasang, persistensi pilihan,
+Reset, dan penerapan ulang saat sudah terpasang. Pratinjau dihapus; editor satu
+kolom tidak menyisakan panel kosong. Smoke disk memakai installer Rust dan PAK
+v12/SQLite fixture: ketiga teks target tepat, mount menyelesaikan PAK turunan,
+Reset identik byte-per-byte dengan sumber, dan empat berkas resource fixture
+tetap identik pada kedua kondisi pemasangan. Build frontend, 20 tes Rust, dan
+APK debug ARM64 beserta verifikasi signature berhasil. Perubahan alur dinamis
+ini belum diuji ulang di game Android: ADB tidak menemukan perangkat ataupun
+layanan mDNS. Bukti gameplay di atas berasal dari alur UID sebelumnya.
+
 ### Browser dan desktop
 
 `src/ipc.ts` memilih transport sebelum memuat mock: browser memakai `mockIPC`
@@ -166,10 +213,11 @@ siap, terpasang, game tidak ditemukan, versi tidak didukung, resource belum siap
 Shizuku mati, izin belum diberikan, dan pemulihan tertunda. Semua tindakan browser
 tetap simulasi; tidak ada penulisan ke game atau peluncuran game.
 
-Custom UID menerima teks/angka maksimal 32 unit UTF-16 dengan pratinjau langsung.
+Custom UID menerima teks/angka maksimal 32 unit UTF-16 tanpa pratinjau.
 UID bawaan `900123456`, versi game `3.7.0`, dan konten `3.7.0-R2` adalah data
-contoh mock, bukan nilai perangkat. Penerapan/pemulihan UID memerlukan patch sehat;
-uninstall mereset tampilannya. Font game tetap bawaan.
+contoh mock, bukan nilai perangkat. Terapkan dari kondisi belum terpasang juga
+menandai patch terpasang dan sehat, sesuai alur native. Hambatan perangkat dan
+pemulihan tetap memblokir tindakan; uninstall mereset tampilannya. Font game tetap bawaan.
 
 State browser disimpan dengan key `wuwaidmobile.mock-state.v3`; skenario mereset
 data contoh dan custom UID. Ekspor diagnostik membedakan `mock: true` dan

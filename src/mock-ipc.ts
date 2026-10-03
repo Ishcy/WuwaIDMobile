@@ -220,13 +220,12 @@ async function perform(
         throw new Error("Terjemahan belum terpasang.");
       if (operation === "apply_uid" || operation === "restore_uid") {
         if (
-          !next.patch.installed ||
-          !next.patch.healthy ||
-          next.patch.recoveryPending
+          next.patch.recoveryPending ||
+          (next.patch.installed && !next.patch.healthy)
         )
-          throw new Error(
-            "UID kustom memerlukan terjemahan terpasang dan sehat.",
-          );
+          throw new Error(readiness(next).detail);
+        if (operation === "restore_uid" && !next.patch.installed)
+          throw new Error("Tidak ada pemasangan UID untuk direset.");
         if (operation === "apply_uid") {
           if (typeof uidText !== "string" || !uidText.trim())
             throw new Error("Masukkan teks UID kustom.");
@@ -260,6 +259,9 @@ async function perform(
         next.uid.custom = null;
         break;
       case "apply_uid":
+        next.patch.installed = true;
+        next.patch.healthy = true;
+        next.patch.recoveryPending = false;
         next.uid.custom = uidText!;
         break;
       case "restore_uid":

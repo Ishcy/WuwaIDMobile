@@ -283,10 +283,11 @@ pub async fn wuwa_run(
                     let status = installer::inspect(&*storage, &layout)?;
                     let custom_uid = match operation.as_str() {
                         "apply_uid" | "restore_uid" => {
-                            if !status.installed || !status.healthy || status.recovery_pending {
-                                return Err(
-                                    "UID kustom memerlukan terjemahan terpasang dan sehat.".into(),
-                                );
+                            if status.recovery_pending || (status.installed && !status.healthy) {
+                                return Err("Jalankan Perbaiki di Perawatan.".into());
+                            }
+                            if operation == "restore_uid" && !status.installed {
+                                return Err("Tidak ada pemasangan UID untuk direset.".into());
                             }
                             if operation == "apply_uid" {
                                 Some(

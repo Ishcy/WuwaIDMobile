@@ -155,7 +155,6 @@ function renderHome() {
         <div class="package-state"><span class="status-dot ${ready.ready ? "good" : "warning"}"></span><div><strong>${esc(ready.label)}</strong>${!ready.ready ? `<p>${esc(ready.detail)}</p>` : ""}</div></div>
         <div class="package-facts"><div><span>Terbaru</span><strong>${esc(contentVersion)}</strong></div><div><span>Versi game</span><strong>${esc(gameLine)}</strong></div>${d.patch.installed ? `<div><span>Terpasang</span><strong>${esc(d.patch.version)}</strong></div>` : ""}</div>
         ${d.patch.installed && ready.ready ? `<button class="text-button" data-action="install" ${disabled}>Pasang ulang ${icon("refresh")}</button>` : ""}
-        ${d.mode === "native" && d.platformSupported ? `<p class="safety-note">${icon("shield")} PAK asli tetap utuh. Game ditutup saat pemasangan.</p>` : ""}
       </section>
       <section class="card device-card" aria-labelledby="device-title">
         <div class="card-header"><h2 id="device-title">Perangkat</h2><button class="icon-btn" data-action="refresh" aria-label="Periksa perangkat" ${state.busy ? "disabled" : ""}>${icon("refresh")}</button></div>
@@ -333,16 +332,12 @@ app.addEventListener("input", (event) => {
   state.uidDraft = input.value;
   const draft = state.uidDraft.trim();
   const d = state.dashboard;
-  app.querySelector<HTMLOutputElement>("#uid-preview")!.textContent =
-    draft || d.uid.original || "UID asli game";
   app.querySelector<HTMLElement>("#uid-count")!.textContent =
     `${state.uidDraft.length}/${UID_MAX_LENGTH}`;
   app.querySelector<HTMLButtonElement>("#apply-uid")!.disabled =
     state.busy ||
     !d.uidAvailable ||
     !readiness(d).ready ||
-    !d.patch.installed ||
-    !d.patch.healthy ||
     !draft ||
     draft.length > UID_MAX_LENGTH ||
     draft === (d.uid.custom ?? d.uid.original);

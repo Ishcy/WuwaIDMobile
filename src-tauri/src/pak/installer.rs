@@ -2124,7 +2124,7 @@ mod tests {
         let release = release(&pak, "v3.7.1-id.1");
         let original = fs::read(&pak).unwrap();
         let official = fs::read(root.path().join(&layout.signature)).unwrap();
-        install(&storage, &layout, &release, &pak, None, &no_progress).unwrap();
+        assert!(!inspect(&storage, &layout).unwrap().installed);
         let applied = install(
             &storage,
             &layout,
