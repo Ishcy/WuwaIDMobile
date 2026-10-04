@@ -46,9 +46,10 @@ jobs:
       - name: Install JavaScript dependencies
         run: npm ci
 
-      - name: Check and build frontend
+      - name: Check, test and build frontend
         run: |
           npm run check
+          npm test
           npm run build
 
       - name: Check Rust formatting
@@ -61,7 +62,7 @@ jobs:
         run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets
 
   android:
-    name: Build Android debug APK
+    name: Build Android APK and host-test updater
     runs-on: ubuntu-24.04
     steps:
       - name: Check out source
@@ -101,6 +102,10 @@ jobs:
 
       - name: Build Android debug APK
         run: npm run tauri android build -- --debug --apk --target aarch64
+
+      - name: Run updater host behavior tests
+        working-directory: src-tauri/gen/android
+        run: ./gradlew :app:testUniversalDebugUnitTest --no-configuration-cache --console=plain
 
       - name: Upload Android debug APK
         uses: actions/upload-artifact@v4

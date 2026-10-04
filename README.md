@@ -146,6 +146,100 @@ Solaris-3** tampil dalam Bahasa Indonesia tanpa dialog error pada layar tersebut
 Pengujian gameplay untuk UID kustom dijelaskan di bawah; belum memeriksa seluruh
 konten terjemahan.
 
+### Pembaruan aplikasi Android (WM-26)
+
+Updater **aplikasi** memakai rilis stabil
+[`TitoTFP/WuwaIDMobile`](https://github.com/TitoTFP/WuwaIDMobile/releases),
+bukan repository PAK `TitoTFP/WuwaID`. Pemeriksaan otomatis dilakukan saat
+aplikasi dibuka; **Perawatan → Pembaruan aplikasi → Periksa pembaruan** tersedia
+untuk pemeriksaan manual. Notifikasi berupa banner di dalam aplikasi, bukan
+layanan background atau notifikasi Android ketika aplikasi ditutup.
+
+Jika ada versi lebih baru:
+
+1. Banner menampilkan versi terpasang, versi baru dan ukuran APK.
+2. Tekan **Unduh APK**; progres unduhan dan verifikasi ditampilkan.
+3. Tekan **Pasang update**. Jika Android meminta izin pemasangan dari sumber
+   ini, izinkan WuwaID Mobile lalu kembali; pemasang dilanjutkan setelah izin
+   aktual diperiksa. Jika ditolak, APK tetap tersimpan dan dapat dicoba lagi.
+4. Konfirmasikan pemasangan pada layar Android. Aplikasi tidak memasang update
+   diam-diam dan tidak menghapus data atau PAK. Pembatalan pemasang tidak
+   dianggap sebagai update yang berhasil.
+
+Unduhan hanya menerima nama aset `WuwaID-Mobile-v<versi>.apk` dari repository
+resmi melalui HTTPS dengan redirect host GitHub yang dibatasi. Ukuran dan
+SHA-256 diverifikasi (digest aset GitHub, atau `SHA256sums.txt` pada rilis yang
+sama). Sebelum membuka pemasang, cache diperiksa ulang: package harus
+`com.titotfp.wuwaid`, versionName sesuai tag, versionCode lebih tinggi,
+sertifikat signer sesuai signing asli dan aplikasi terpasang, minSdk didukung,
+serta terdapat pustaka native ARM64. Verifikasi signature final dan pemasangan
+tetap dilakukan oleh Android. URI `FileProvider` hanya mengekspos subfolder
+cache `app-updates/`, dengan grant baca sementara.
+
+APK yang sudah diverifikasi dapat dipakai kembali setelah aplikasi ditutup
+atau kembali dari pengaturan izin. Unduhan terputus tidak dianggap siap;
+file parsial dibersihkan ketika unduhan dicoba kembali. Cache yang gagal
+verifikasi ditolak dan perlu diunduh ulang. Kegagalan jaringan updater tidak
+menghalangi status atau operasi game; updater tidak meminta root/Shizuku.
+Download/pemasangan update dan mutasi PAK tidak dijalankan bersamaan dari UI.
+Browser, desktop, APK debug dan signing yang tidak cocok menampilkan batas
+dukungan, bukan update simulasi.
+
+Kanal hanya menerima rilis stabil, bukan draft/prerelease. Workflow rilis
+menandai publikasi yang sudah disetujui QA sebagai stabil, termasuk versi
+`0.x`; kandidat yang belum disetujui tetap hanya artifact QA. Bila belum ada
+rilis stabil, UI menyatakan itu—bukan mengklaim sudah memakai versi terbaru.
+Rilis berikutnya wajib menaikkan versionCode dari **8**, mempertahankan package
+dan signing, serta menyamakan versi npm/Cargo/Tauri dan tag.
+
+**Status WM-26:** implementasi, 37 tes perilaku host/UI dan smoke browser telah
+diverifikasi. Pengguna kemudian melaporkan **“sudah kuuji aman”** dan meminta
+commit. Penerimaan perangkat dicatat berdasarkan laporan tersebut, tanpa
+mengklaim seluruh checklist QA telah dijalankan atau cakupan yang tidak dilaporkan.
+Kandidat baru tetap `0.4.0` / versionCode **8**; memasang kandidat ini pertama kali masih
+manual karena APK branding sebelumnya belum memiliki updater. Bukti kandidat
+dan checklist QA dicatat di work item; kandidat tidak dipublikasikan.
+
+**Kandidat QA updater WM-26:** APK release ARM64 berhasil dikompilasi dengan
+signing asli; package `com.titotfp.wuwaid`, versi `0.4.0` / code 8, signature v2
+dan alignment 16 KiB telah diperiksa. Ukuran **10.506.333 byte**.
+
+```text
+src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk
+SHA-256: f5a089582f140d0eef19c5ab4c4a6a692f2351b2fa74a579441d424eefa85565
+```
+
+Pengujian yang dilakukan setelah pengguna mengizinkan tes oleh asisten:
+
+- **27 tes Kotlin/Robolectric:** rilis/versi numerik, fallback checksum, HTTPS
+  dan redirect, unduhan terputus/ukuran/digest, identitas dan signer APK,
+  signature rusak meskipun checksum cocok, minSdk/ABI, cache/restore, izin,
+  pembatalan, hasil pemasang dan lifecycle. APK fixture dibuat dengan SDK/NDK
+  dan signing key sementara; HTTP benar-benar melewati server TLS lokal.
+- **10 tes Vitest/jsdom**, dengan pemeriksaan tipe: state/busy, overlap aksi,
+  progres aksesibel, kegagalan/pemulihan, batas dukungan dan escaping.
+- **24 tes Rust yang sudah ada**, build frontend, serta parsing workflow berhasil.
+- Smoke Chromium pada 412×915: fallback browser, banner/progres/siap pasang,
+  pembatalan, penguncian/pemulihan aksi UID, serta draf/fokus/seleksi UID.
+  Transport updater pada smoke ini disimulasikan, bukan instalasi Android.
+
+Tes APK valid menemukan regresi parser arsip **Android 9/API 28**: flag
+`GET_SIGNING_CERTIFICATES` saja tidak mengumpulkan sertifikat. Updater kini juga
+menetapkan `GET_SIGNATURES`; tes gagal-sebelum/lulus-sesudah dipertahankan.
+[Perintah, adaptasi JVM dan batas bukti](docs/android.md#tes-host-updater-wm-26)
+didokumentasikan; CI dan workflow rilis menjalankan kedua suite updater.
+
+APK di atas sudah dibangun ulang setelah perbaikan. Warning Rust/API legacy,
+deprecation AGP dan configuration-cache pada `verifyUpgradeSigning` masih ada;
+tes/build tidak gagal. Workflow GitHub belum dijalankan oleh asisten. Asisten
+tidak menguji installer Android nyata, ADB atau game. Penerimaan updater dari
+pengguna dicatat terpisah dari penerimaan branding sebelumnya.
+
+Pre-commit review tidak mengubah perilaku kandidat yang diterima. Format bridge
+baru sudah sesuai `rustfmt`; `cargo fmt --check` seluruh repository masih gagal
+pada enam berkas baseline yang tidak diubah WM-26. Rincian batas verifikasi ini
+dicatat pada dokumentasi Android; tidak ada reformat massal dalam commit updater.
+
 ### Upgrade dari aplikasi sebelum Tauri (WM-25)
 
 Sumber tag dan APK publik **v0.1.0, v0.2.0, v0.3.0–v0.3.4** telah diperiksa,
@@ -310,9 +404,9 @@ merupakan simulasi, bukan screenshot perangkat. Signature v2, sertifikat rilis
 asli dan alignment native 16 KiB valid. Pengguna kemudian melaporkan update
 perangkat berhasil dan menerima framing terbaru dengan “Nice! Oke!”.
 
-APK terbaru menggunakan lokasi output yang sama dengan kandidat WM-25 di atas,
-sehingga hasil build tersebut kini menimpa file kandidat sebelumnya. Ukuran
-**10.476.933 byte**; SHA-256 APK terbaru:
+Kandidat branding tersebut memakai lokasi output yang sama dengan kandidat
+WM-25, dan kemudian digantikan kandidat updater WM-26. Bukti branding tetap
+merujuk APK berukuran **10.476.933 byte** dengan SHA-256:
 
 ```text
 6710ce66966220ff5fad823534407c4d33b31593bc2d601eaa764fe225659a99
@@ -321,7 +415,7 @@ sehingga hasil build tersebut kini menimpa file kandidat sebelumnya. Ukuran
 Penerimaan perangkat WM-25 di atas berlaku untuk kandidat dengan checksum
 sebelumnya, bukan bukti pengujian tampilan nama/ikon yang baru.
 
-Penerimaan branding dicatat terpisah: APK dengan checksum terbaru di atas
+Penerimaan branding dicatat terpisah: APK dengan checksum branding di atas
 berhasil dipasang dengan `adb install -r`, kemudian pengguna menyetujui hasilnya.
 Review pre-commit tidak mengubah kode aplikasi atau APK yang telah diterima;
 asisten tidak menjalankan ulang tes perangkat.

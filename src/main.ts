@@ -1,4 +1,5 @@
 import { api } from "./ipc";
+import { appUpdateBusy, handleAppUpdate, initAppUpdates, renderAppUpdate } from "./app-update";
 import {
   CONTENT_VERSION,
   UID_MAX_LENGTH,
@@ -72,7 +73,7 @@ function notify(message: string) {
 function renderHome() {
   const d = state.dashboard;
   const ready = readiness(d);
-  const disabled = state.busy || !d.platformSupported ? "disabled" : "";
+  const disabled = state.busy || appUpdateBusy() || !d.platformSupported ? "disabled" : "";
   let primary: { action: string; label: string } = {
     action: "install",
     label: "Pasang terjemahan",
@@ -161,7 +162,7 @@ function renderHome() {
         ${d.patch.installed && ready.ready ? `<button class="text-button" data-action="install" ${disabled}>Pasang ulang ${icon("refresh")}</button>` : ""}
       </section>
       <section class="card device-card" aria-labelledby="device-title">
-        <div class="card-header"><h2 id="device-title">Perangkat</h2><button class="icon-btn" data-action="refresh" aria-label="Periksa perangkat" ${state.busy ? "disabled" : ""}>${icon("refresh")}</button></div>
+        <div class="card-header"><h2 id="device-title">Perangkat</h2><button class="icon-btn" data-action="refresh" aria-label="Periksa perangkat" ${state.busy || appUpdateBusy() ? "disabled" : ""}>${icon("refresh")}</button></div>
         <div class="device-list">${deviceRows.map((row) => `<div class="device-row"><span class="device-icon">${icon(row.icon)}</span><div><strong>${row.name}</strong><p>${esc(row.value)}</p></div><span class="device-check ${row.ok ? "" : "pending"}" aria-label="${row.ok ? "Siap" : "Perlu perhatian"}">${row.ok ? icon("check") : icon("info")}</span></div>`).join("")}</div>
       </section>
     </div>`;
@@ -170,6 +171,9 @@ function renderHome() {
 function render() {
   const focused = document.activeElement as HTMLElement | null;
   const focusAction = focused?.dataset.action;
+  const uidSelection = focused instanceof HTMLInputElement && focused.id === "uid-input"
+    ? { start: focused.selectionStart, end: focused.selectionEnd, direction: focused.selectionDirection }
+    : null;
   if (!app.querySelector(".app-header")) {
     app.innerHTML = `<header class="app-header"><div class="header-inner"><a class="brand" href="#home" aria-label="WuwaIDMobile Beranda"><span class="brand-symbol">${logo}</span><span>wuwa<span class="brand-id">id</span></span></a><nav class="desktop-nav" aria-label="Navigasi utama">${navigation.map((item) => `<button class="nav-item ${section === item.id ? "active" : ""}" data-section="${item.id}" ${section === item.id ? 'aria-current="page"' : ""}>${item.label}</button>`).join("")}</nav>${renderThemeControl()}</div></header>
     <div class="workspace">${state.dashboard.mode === "mock" ? `<p class="mode-notice">${icon("info")} Simulasi · file game tidak diubah.</p>` : ""}
@@ -183,10 +187,12 @@ function render() {
     else button.removeAttribute("aria-current");
   });
   const content = app.querySelector<HTMLElement>("#main-content")!;
+  const panelState = appUpdateBusy() ? { ...state, busy: true } : state;
   content.innerHTML = `
     ${error ? `<div class="error-banner" role="alert">${icon("info")}<span>${esc(error)}</span><button class="icon-btn" data-action="dismiss-error" aria-label="Tutup pesan">${icon("close")}</button></div>` : ""}
     ${state.busy ? `<div class="progress-card" role="status" aria-live="polite"><div><strong>${esc(state.progress?.label ?? "Menyiapkan…")}</strong><span>${state.progress?.percent ?? 0}%</span></div><div class="progress-track" role="progressbar" aria-label="Progres pemasangan" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${state.progress?.percent ?? 0}"><span class="progress-fill" style="transform: scaleX(${(state.progress?.percent ?? 0) / 100})"></span></div></div>` : ""}
-    ${section === "home" ? renderHome() : section === "customize" ? renderCustomize(state) : renderTools(state)}`;
+    ${renderAppUpdate(state.busy, section === "tools")}
+    ${section === "home" ? renderHome() : section === "customize" ? renderCustomize(panelState) : renderTools(panelState)}`;
   if (renderedSection !== section) {
     content.getAnimations().forEach((animation) => animation.cancel());
     if (!reducedMotion.matches)
@@ -204,10 +210,15 @@ function render() {
     Array.from(app.querySelectorAll<HTMLElement>("[data-action]"))
       .find((el) => el.dataset.action === focusAction)
       ?.focus({ preventScroll: true });
+  if (uidSelection) {
+    const input = app.querySelector<HTMLInputElement>("#uid-input");
+    input?.focus({ preventScroll: true });
+    input?.setSelectionRange(uidSelection.start, uidSelection.end, uidSelection.direction ?? "none");
+  }
 }
 
 async function execute(work: () => Promise<void>) {
-  if (state.busy) return;
+  if (state.busy || appUpdateBusy()) return;
   const busyTrace = api.beginBusy();
   state.busy = true;
   state.progress = null;
@@ -290,6 +301,7 @@ app.addEventListener("click", async (event) => {
     return;
   }
   const action = button.dataset.action;
+  if (await handleAppUpdate(action, state.busy)) return;
   if (action === "dismiss-error") {
     error = "";
     render();
@@ -405,6 +417,7 @@ async function start() {
       uidDraft: dashboard.uid.custom ?? "",
     };
     render();
+    void initAppUpdates(render);
   } catch (cause) {
     app.innerHTML = `<main class="startup-error"><h1>Gagal memuat</h1><p>${esc(String(cause))}</p><button class="btn btn-primary" id="retry-start">Coba lagi</button></main>`;
     document.querySelector("#retry-start")!.addEventListener("click", start);

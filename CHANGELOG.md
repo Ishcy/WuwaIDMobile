@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- Add the Android application updater (WM-26), separate from translation PAK
+  releases: check stable WuwaIDMobile releases on startup or manually, show an
+  in-app update banner, stream and verify APK downloads with progress, then open
+  the Android installer with explicit user confirmation. Handle unknown-source
+  permission return, cancellation, interrupted downloads and verified cache
+  reuse without root/Shizuku or game-file mutation. Enforce release identity,
+  higher versionCode, pinned signer, supported minSdk/ARM64, bounded HTTPS hosts
+  and size/SHA-256 checks. Narrow FileProvider to the updater cache. Disable
+  release updates on debug/browser/desktop builds; retain UID focus during
+  background check completion. Publish QA-approved 0.x releases as stable so
+  the updater can discover them. The user subsequently reported device testing
+  safe and accepted the candidate for commit; detailed scenario coverage was not
+  supplied.
+- Add WM-26 behavior coverage: 27 Kotlin/Robolectric cases with locally served
+  TLS downloads and SDK-built, ephemeral-key-signed APKs; 10 type-checked DOM/UI
+  cases; CI and release execution. Exercise cache integrity, unsafe metadata,
+  APK identity/signatures, permissions, cancellation and lifecycle. Fix the
+  Android 9 archive parser rejecting valid APKs by requesting GET_SIGNATURES
+  alongside GET_SIGNING_CERTIFICATES. Preserve the failing-before/passing-after
+  regression. Browser smoke and 24 existing Rust tests pass; the assistant did
+  not run the real Android installer or game tests. Device acceptance is recorded
+  from the user's report, separately from host-test evidence.
+
 - Fix the launcher icon appearing over-zoomed on the user's device. Use a separate
   Android foreground SVG with centered 72×72 artwork inside the 108×108 adaptive
   canvas, preserving transparent padding through icon regeneration. Enlarge the
@@ -37,7 +60,7 @@
   identities/certificates and verify debug APK v2 signing and 16 KiB alignment.
   Build a release ARM64 upgrade candidate with the original keystore subsequently
   supplied by the user; verify final package/version, the original certificate,
-  v2 signing and 16 KiB alignment. No tests were run by the assistant.
+  v2 signing and 16 KiB alignment. No assistant tests were run for that WM-25 handoff.
   The user reported successful release APK installation and completed device QA
   with safe, correct operation; WM-25 is accepted on that confirmation. No
   exhaustive scenario coverage, pre-upgrade version, official-file hash comparison

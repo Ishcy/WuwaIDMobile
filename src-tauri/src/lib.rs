@@ -1,5 +1,6 @@
 #[cfg(target_os = "android")]
 mod android;
+mod app_update;
 mod native;
 mod pak;
 mod trace;
@@ -14,10 +15,11 @@ pub fn run() {
             native::wuwa_open_setup,
             native::wuwa_diagnostics,
             native::wuwa_trace_enabled,
-            native::wuwa_ui_trace
+            native::wuwa_ui_trace,
+            app_update::wuwa_app_update
         ]);
     #[cfg(target_os = "android")]
-    let builder = builder.plugin(android::init());
+    let builder = builder.plugin(android::init()).plugin(app_update::init());
     builder
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

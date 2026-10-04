@@ -61,6 +61,16 @@ export interface Diagnostics {
   filename: string;
   content: string;
 }
+export interface AppUpdateStatus {
+  supported: boolean;
+  currentVersion: string | null;
+  currentVersionCode: number | null;
+  availableVersion: string | null;
+  size: number;
+  ready: boolean;
+  checked: boolean;
+  message: string;
+}
 export interface UiState {
   dashboard: Dashboard;
   busy: boolean;

@@ -55,6 +55,11 @@ jobs:
         run: |
           export NDK_HOME="$ANDROID_HOME/ndk/27.3.13750724"
           npm run tauri android build -- --apk --target aarch64
+      - name: Run updater behavior tests
+        run: |
+          export NDK_HOME="$ANDROID_HOME/ndk/27.3.13750724"
+          npm test
+          ./src-tauri/gen/android/gradlew -p src-tauri/gen/android :app:testUniversalDebugUnitTest --no-configuration-cache --console=plain
       - name: Verify upgrade identity and prepare artifacts
         env:
           RELEASE_TAG: ${{ inputs.tag }}
@@ -97,7 +102,7 @@ jobs:
         with:
           tag_name: ${{ inputs.tag }}
           name: WuwaID Mobile ${{ inputs.tag }}
-          prerelease: ${{ startsWith(inputs.tag, 'v0.') }}
+          prerelease: false
           generate_release_notes: true
           files: |
             WuwaID-Mobile-${{ inputs.tag }}.apk

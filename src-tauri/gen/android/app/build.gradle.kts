@@ -104,6 +104,15 @@ android {
         buildConfig = true
         aidl = true
     }
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+        unitTests.all {
+            it.jvmArgs("--add-exports=java.base/jdk.internal.access=ALL-UNNAMED")
+            it.systemProperty("robolectric.dependency.repo.url", "https://repo.maven.apache.org/maven2")
+            it.systemProperty("wm26.sdk", android.sdkDirectory.absolutePath)
+            it.systemProperty("wm26.ndk", providers.environmentVariable("NDK_HOME").orElse("").get())
+        }
+    }
 }
 
 kotlin {
@@ -126,6 +135,14 @@ dependencies {
     implementation("dev.rikka.shizuku:provider:13.1.5")
     implementation("com.github.topjohnwu.libsu:service:6.0.0")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.17")
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    testImplementation("com.squareup.okhttp3:okhttp-tls:4.12.0")
+    testImplementation("com.android.tools.build:apksig:8.13.2")
+    testImplementation("com.fasterxml.jackson.core:jackson-databind:2.15.3")
+    testImplementation("com.fasterxml.jackson.datatype:jackson-datatype-json-org:2.15.3") {
+        exclude(group = "org.json", module = "json")
+    }
     androidTestImplementation("androidx.test.ext:junit:1.1.4")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.0")
 }

@@ -1,6 +1,7 @@
-import { invoke, isTauri } from "@tauri-apps/api/core";
+import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
+  AppUpdateStatus,
   Dashboard,
   Diagnostics,
   Operation,
@@ -70,6 +71,16 @@ export const api = {
   diagnostics: () => command<Diagnostics>("wuwa_diagnostics"),
   openSetup: (target: "game" | "shizuku") =>
     command<void>("wuwa_open_setup", { target }),
+  appUpdate(action: "status" | "check" | "download" | "install", onProgress?: (progress: Progress) => void): Promise<AppUpdateStatus> {
+    if (!native) return Promise.resolve({
+      supported: false, currentVersion: null, currentVersionCode: null,
+      availableVersion: null, size: 0, ready: false, checked: false,
+      message: "Updater APK hanya tersedia pada aplikasi Android release; browser tidak melakukan update aplikasi.",
+    });
+    const progress = new Channel<Progress>();
+    progress.onmessage = (value) => onProgress?.(value);
+    return command<AppUpdateStatus>("wuwa_app_update", { action, progress });
+  },
   subscribeProgress(listener: (progress: Progress) => void): () => void {
     progressListeners.add(listener);
     return () => progressListeners.delete(listener);
