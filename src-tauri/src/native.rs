@@ -9,7 +9,9 @@ use serde::Serialize;
 use tauri::Emitter;
 use tauri::{AppHandle, Manager};
 
-use crate::pak::model::{InstallStatus, PakResult, Release, ResourceLayout, GAME_PACKAGE};
+use crate::pak::model::{InstallStatus, PakResult, Release, ResourceLayout};
+#[cfg(not(target_os = "android"))]
+use crate::pak::model::GAME_PACKAGE;
 use crate::trace::{Request, Span};
 #[cfg(target_os = "android")]
 use crate::pak::{installer, release, uid};
@@ -60,7 +62,7 @@ pub struct Dashboard {
 struct Game {
     installed: bool,
     version: String,
-    package_name: &'static str,
+    package_name: String,
 }
 #[derive(Serialize)]
 struct Resource {
@@ -99,6 +101,7 @@ fn empty_status() -> InstallStatus {
         installed: false,
         healthy: false,
         recovery_pending: false,
+        legacy_pending: false,
         version: String::new(),
         message: None,
         custom_uid: None,
@@ -129,7 +132,7 @@ fn bridge(app: &AppHandle) -> tauri::State<'_, crate::android::MobileBridge<taur
 #[cfg(any(target_os = "android", test))]
 fn physical_prerequisites(probe: &DeviceProbe) -> PakResult<()> {
     if !probe.game_installed {
-        return Err("Wuthering Waves Global belum terpasang.".into());
+        return Err("Wuthering Waves Global atau Galaxy Store belum terpasang.".into());
     }
     if !probe.access_granted {
         return Err(if probe.access_method == "root" {
@@ -200,7 +203,7 @@ fn load_dashboard(
                 None => "Pemasangan .pak memerlukan Android dengan Shizuku atau root. Desktop tidak menulis direktori game.".into(),
             }),
             release: selected_release, uid_available: false,
-            game: Game { installed: false, version: String::new(), package_name: GAME_PACKAGE },
+            game: Game { installed: false, version: String::new(), package_name: GAME_PACKAGE.into() },
             resource: Resource { ready: false, version: String::new() },
             shizuku: Shizuku { running: false, granted: false }, patch: empty_status(),
             access: Access { method: "shizuku".into(), granted: false },
@@ -255,7 +258,7 @@ fn load_dashboard(
             game: Game {
                 installed: probe.game_installed,
                 version: probe.game_version,
-                package_name: GAME_PACKAGE,
+                package_name: probe.game_package,
             },
             resource,
             shizuku: Shizuku {
@@ -358,6 +361,8 @@ pub async fn wuwa_run(
                         installer::uninstall(&*storage, &layout, &progress)?
                     } else if operation == "repair" && status.recovery_pending {
                         installer::recover(&*storage, &layout, &progress)?
+                    } else if operation == "repair" && status.legacy_pending {
+                        installer::migrate_legacy(&*storage, &layout, &progress)?
                     } else {
                         let release = fetch_release(&app)?;
                         check_compatibility(&probe, &layout, &release)?;
@@ -442,6 +447,7 @@ mod access_tests {
         DeviceProbe {
             game_installed: true,
             game_version: "3.7.0".into(),
+            game_package: crate::pak::model::GAME_PACKAGE.into(),
             shizuku_running: false,
             shizuku_granted: false,
             access_method: "root".into(),

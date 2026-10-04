@@ -67,6 +67,7 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
   private val rootSession = RootSession(activity)
   private val accessPreferences = activity.getSharedPreferences("storage-access", Activity.MODE_PRIVATE)
   private var accessMethod = accessPreferences.getString("method", "shizuku") ?: "shizuku"
+  @Volatile private var selectedGamePackage: String? = null
   @Volatile private var userService: IStorageUserService? = null
   private var serviceBinding = false
   private var serviceReady: CountDownLatch? = null
@@ -74,7 +75,7 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
   private var permissionRequestId = 0L
   private val userServiceArgs = Shizuku.UserServiceArgs(
     ComponentName(activity.packageName, StorageUserService::class.java.name)
-  ).daemon(false).tag("wuwaid-storage").version(2).processNameSuffix("wuwaid-storage")
+  ).daemon(false).tag("wuwaid-storage").version(3).processNameSuffix("wuwaid-storage")
   private var serviceConnection: ServiceConnection? = null
   private fun newServiceConnection() = object : ServiceConnection {
     override fun onServiceConnected(name: ComponentName, binder: IBinder) {
@@ -154,7 +155,9 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
 
     when (args.action) {
       "request_permission" -> requestPermission(invoke, args.requestId)
-      "launch_game" -> runOnUi(invoke) { launchPackage(GAME_PACKAGE) }
+      "launch_game" -> runOnUi(invoke) {
+        launchPackage(selectedGamePackage ?: GamePackages.supported.firstOrNull { installedGameVersion(it) != null } ?: GAME_PACKAGE)
+      }
       "request_root" -> dispatch(invoke) {
         check(accessMethod == "root") { "Pilih metode Root terlebih dahulu." }
         rootSession.request(args.requestId)
@@ -266,7 +269,7 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
 
   private fun launchPackage(packageName: String) {
     val intent = activity.packageManager.getLaunchIntentForPackage(packageName)
-      ?: throw IllegalStateException("${if (packageName == GAME_PACKAGE) "Wuthering Waves" else "Shizuku"} is not installed")
+      ?: throw IllegalStateException("${if (packageName in GamePackages.supported) "Wuthering Waves" else "Shizuku"} is not installed")
     activity.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
   }
 
@@ -300,7 +303,10 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
   }
 
   private fun probeDevice(): Map<String, Any?> {
-    val gameVersion = installedGameVersion()
+    val installed = GamePackages.supported.mapNotNull { packageName ->
+      installedGameVersion(packageName)?.let { packageName to it }
+    }.toMap()
+    var gamePackage = selectedGamePackage ?: installed.keys.firstOrNull() ?: GAME_PACKAGE
     val shizukuRunning = try {
       Shizuku.pingBinder()
     } catch (_: Exception) {
@@ -322,6 +328,13 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
     val accessGranted = if (accessMethod == "root") rootSession.granted() else shizukuGranted
     if (accessGranted) {
       try {
+        if (installed.isNotEmpty()) {
+          val candidates = selectedGamePackage?.let { listOf(it) } ?: installed.keys.toList()
+          val detected = JSONObject(metadata("detect_game", JSONArray(candidates).toString()).stdoutText()).getString("packageName")
+          check(detected in installed) { "Selected game is no longer installed; reopen WuwaIDMobile." }
+          selectedGamePackage = detected
+          gamePackage = detected
+        }
         val status = JSONObject(metadata("probe_root").stdoutText())
         rootReadable = status.getBoolean("readable")
         rootWritable = status.getBoolean("writable")
@@ -331,8 +344,9 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     return mapOf<String, Any?>(
-      "gameInstalled" to (gameVersion != null),
-      "gameVersion" to (gameVersion ?: ""),
+      "gameInstalled" to installed.containsKey(gamePackage),
+      "gameVersion" to (installed[gamePackage] ?: ""),
+      "gamePackage" to gamePackage,
       "shizukuRunning" to shizukuRunning,
       "shizukuGranted" to shizukuGranted,
       "accessMethod" to accessMethod,
@@ -344,14 +358,14 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
   }
 
   @Suppress("DEPRECATION")
-  private fun installedGameVersion(): String? = try {
+  private fun installedGameVersion(packageName: String): String? = try {
     val info = if (android.os.Build.VERSION.SDK_INT >= 33) {
       activity.packageManager.getPackageInfo(
-        GAME_PACKAGE,
+        packageName,
         PackageManager.PackageInfoFlags.of(0L)
       )
     } else {
-      activity.packageManager.getPackageInfo(GAME_PACKAGE, 0)
+      activity.packageManager.getPackageInfo(packageName, 0)
     }
     info.versionName ?: "unknown"
   } catch (_: PackageManager.NameNotFoundException) {
@@ -509,8 +523,11 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
       throw IllegalStateException("Shizuku API 12 or newer is required; update Shizuku")
     }
   }
-  private fun connectedStorageService(): IStorageUserService =
-    if (accessMethod == "root") rootSession.connected() else connectedUserService()
+  private fun connectedStorageService(): IStorageUserService {
+    val service = if (accessMethod == "root") rootSession.connected() else connectedUserService()
+    selectedGamePackage?.let { service.selectGame(it) }
+    return service
+  }
 
 
   private fun connectedUserService(): IStorageUserService {

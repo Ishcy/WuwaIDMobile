@@ -1,4 +1,4 @@
-# WuwaIDMobile
+# WuwaID Mobile
 
 Pendamping lokalisasi **Wuthering Waves dalam Bahasa Indonesia**, dibangun dengan
 **Tauri 2** untuk desktop dan Android. Frontend menggunakan TypeScript, HTML, CSS,
@@ -47,7 +47,8 @@ ukuran dan SHA-256 sebelum digunakan. Cache yang dipakai ulang juga diverifikasi
 Pemasangan standar menyalin PAK utuh. UID kustom mengubah database teks dalam
 salinan privat lalu mengemas ulang PAK; berkas sumber rilis tetap utuh.
 
-1. Pasang **Wuthering Waves Global** (`com.kurogame.wutheringwaves.global`).
+1. Pasang **Wuthering Waves Global** (`com.kurogame.wutheringwaves.global`) atau
+   **Galaxy Store** (`com.kurogame.wutheringwaves.samsung`).
 2. Buka game dan selesaikan unduhan resource, termasuk paket bahasa Inggris.
 3. Pilih metode akses di **Perawatan**:
    - **Shizuku** (default): pasang dan jalankan [Shizuku](https://shizuku.rikka.app/),
@@ -78,7 +79,7 @@ Kontrak ini sama dengan [Resource Mount WuwaIDLauncher](https://github.com/TitoT
 dan `removeSuffix(".pak")` pada bytecode APK Android asal. Folder `Patch/`
 adalah layout launcher PC; layout Android tetap `wuwaid/`.
 
-Pemasangan dari build lama yang mencantumkan `.pak` pada descriptor ditandai
+Pemasangan dari build Tauri lama yang mencantumkan `.pak` pada descriptor ditandai
 **Perlu pemulihan**, bukan sehat. **Perbaiki pemasangan** memperbarui descriptor
 dan hash kepemilikannya secara transaksional. **Hapus terjemahan** juga dapat
 menghapus pemasangan lama yang terverifikasi tanpa harus memperbaikinya terlebih
@@ -90,8 +91,9 @@ kepemilikan valid dan custom mount lain dengan prioritas 99 atau lebih tinggi
 menghalangi pemasangan. Berkas disiapkan dan diverifikasi sebelum commit;
 jurnal dan backup menyimpan snapshot untuk rollback/pemulihan. **Perbaiki**
 memulihkan transaksi tertunda tanpa membutuhkan rilis atau koneksi jaringan,
-termasuk transaksi pada versi resource lama. Tanpa transaksi tertunda,
-perbaikan memasang ulang rilis latest yang kompatibel.
+termasuk transaksi pada versi resource lama. Pemasangan sebelum rebuild Tauri
+memakai alur **Migrasikan** berikut; tanpa transaksi/migrasi tertunda, perbaikan
+memasang ulang rilis latest yang kompatibel.
 Residu `.new`/`.bak` tanpa jurnal valid tidak dihapus otomatis: aplikasi
 menolak menebak kepemilikan berkas dan menampilkan kondisi pemulihan terhalang.
 
@@ -143,6 +145,186 @@ server; teks **Keluar**, **Akun**, **Pengaturan**, dan **Ketuk untuk mendarat di
 Solaris-3** tampil dalam Bahasa Indonesia tanpa dialog error pada layar tersebut.
 Pengujian gameplay untuk UID kustom dijelaskan di bawah; belum memeriksa seluruh
 konten terjemahan.
+
+### Upgrade dari aplikasi sebelum Tauri (WM-25)
+
+Sumber tag dan APK publik **v0.1.0, v0.2.0, v0.3.0–v0.3.4** telah diperiksa,
+bukan APK Vietnam yang dipakai sebagai referensi reverse engineering:
+[rilis WuwaIDMobile](https://github.com/TitoTFP/WuwaIDMobile/releases),
+[kontrak berkas v0.3.4](https://github.com/TitoTFP/WuwaIDMobile/blob/v0.3.4/app/src/main/java/com/titotfp/wuwaid/GamePaths.kt).
+Ketujuh APK mempunyai package `com.titotfp.wuwaid`, versionCode 1–7 dan
+sertifikat SHA-256 yang sama:
+
+```text
+2cb1b4fed5446cf52018b5d56d58c379d7328022c1ba17278c19c0002e484df9
+```
+
+Identitas rilis rebuild adalah **0.4.0 / versionCode 8**, dengan package yang
+sama. **Update tanpa uninstall/clear data memerlukan keystore rilis asli.**
+Build rilis menolak kredensial yang tidak lengkap, sertifikat berbeda, atau
+versionCode <= 7. Versi berikutnya wajib menaikkan versionCode dari rilis terakhir,
+bukan hanya mengganti versionName. APK debug memakai `com.titotfp.wuwaid.debug`
+dan bukan pengganti APK publik; build debug Tauri terdahulu yang memakai package
+rilis dan sertifikat debug juga bukan jalur upgrade publik yang kompatibel.
+
+Alur pengguna:
+
+1. Perbarui memakai APK **release bertanda tangan asli**, tanpa menghapus aplikasi
+   maupun datanya. Tutup installer lama; jangan jalankan dua installer bersamaan.
+2. Buka aplikasi dan pilih/berikan akses Shizuku atau Root bila diperlukan. Izin
+   root tidak dianggap tersimpan hanya karena versi sebelumnya mempunyai akses.
+3. Aplikasi mendeteksi `wuwaindonesia/WuWaID_99_P.pak`, signature saudara, dan
+   `Mount/wuwaindonesia.txt` pada semua versi resource numerik. Membuka aplikasi
+   dan refresh **tidak memindahkan/menghapus** berkas.
+4. Pilih **Perawatan → Migrasikan**. Tindakan ini tidak mengunduh PAK atau
+   membutuhkan metadata latest: hash SHA-256 **dan ukuran** PAK harus cocok dengan
+   katalog aset historis [TitoTFP/WuwaID](https://github.com/TitoTFP/WuwaID/releases)
+   yang dipin pada 2026-10-04, signature harus tidak kosong, dan descriptor harus
+   persis menunjuk pasangan SHA-1 terpasang dalam format yang ditulis aplikasi lama.
+5. Game dihentikan. Salinan PAK/signature, mount baru, dan ownership disiapkan di
+   `wuwaid/` lalu dipublikasikan melalui jurnal transaksi yang sama. Berkas lama
+   baru dihapus setelah seluruh hasil baru lolos verifikasi. Jurnal menyimpan
+   bukti hash berkas lama agar cleanup terputus dapat dilanjutkan; rollback sebelum
+   hasil lengkap tidak menghapus sumber lama.
+6. Pemasangan lama pada resource tidak aktif diproses melalui ownership/transaksi
+   yang sama lalu dihapus, bukan dipromosikan menjadi terjemahan resource aktif.
+   **Hapus terjemahan** juga menerima pemasangan lama terverifikasi dan menghapus
+   seluruh set yang dimiliki pada versi resource paket game terpilih.
+7. Setelah migrasi, pasang latest bila versi terjemahan belum sesuai dengan game.
+   UID kustom baru dapat diterapkan setelah status pemasangan sehat.
+
+Hash tidak dikenal, berkas tidak lengkap/berubah, mount berbeda, pemasangan lama
+dan baru berdampingan, konflik mod, atau sisa `.new`/`.new.tmp`/`.bak` lama
+**memblokir mutasi**. Installer lama tidak menyimpan jurnal durable; aplikasi baru
+tidak menebak rollback sisa transaksi tersebut. Berkas tidak dikenal di folder
+lama tidak ikut dihapus. Katalog bukan allowlist untuk semua rilis masa depan:
+sebelum distribusi berikutnya, perbarui hanya dari digest/ukuran aset publik yang
+dapat ditelusuri, bukan hash perangkat atau cache preferensi pengguna.
+
+Galaxy Store tidak kehilangan dukungan: pemilihan mengikuti prioritas versi lama,
+Global yang resource-nya materialized terlebih dahulu, lalu Galaxy Store,
+kemudian paket terpasang pertama. Pilihan dibekukan untuk sesi aplikasi agar
+refresh atau pergantian Shizuku/Root tidak mengalihkan transaksi ke game lain.
+Detail teknis menampilkan paket aktual; force-stop dan guard storage hanya
+menerima kedua package tersebut. Penghapusan tidak menyentuh paket game lain.
+Cache `patch_release` lama tidak dihapus dan tidak dipakai sebagai bukti ownership.
+
+**Penerimaan sebelum rilis — pengujian oleh pengguna:**
+
+- Upgrade in-place dari setiap APK publik v0.1.0–v0.3.4 dengan signing asli;
+  pastikan tidak perlu uninstall/clear data dan hanya ada satu aplikasi release.
+- Ulangi untuk belum pernah memasang terjemahan, pemasangan sehat, resource lama,
+  serta game Global/Galaxy Store; jika keduanya ada, periksa paket yang dipilih.
+- Periksa ulang tanpa internet: deteksi/migrasi/pemulihan/penghapusan lama tetap
+  tersedia. Setelah migrasi, unduh latest yang kompatibel dan uji dalam game.
+- Coba Shizuku diizinkan/ditolak/restart dan Root diizinkan/ditolak; tidak boleh
+  ada prompt root otomatis atau fallback transport diam-diam.
+- Putus proses saat staging, publikasi, dan cleanup migrasi; setelah dibuka
+  ulang, **Perbaiki** harus mempertahankan sumber lama atau menyelesaikan hasil
+  baru terverifikasi, tanpa dua mount aktif setelah pemulihan selesai.
+- PAK rusak/tidak dikenal, descriptor berubah, file hilang, legacy `.bak/.new`,
+  dan dua layout berdampingan harus ditolak tanpa mengubah berkas yang ambigu.
+- Setelah migrasi: install/update, UID Apply/Reset, uninstall, buka ulang aplikasi
+  dan game. Bandingkan hash PAK/signature/mount resmi sebelum/sesudah.
+
+Pengujian upgrade dan perilaku migrasi **belum dijalankan oleh asisten**, sesuai
+instruksi pengguna. Keystore rilis asli kemudian disediakan pengguna dan APK
+release untuk pengujian in-place berhasil dibuat. Build debug tetap hanya untuk
+pemeriksaan migrasi berkas, bukan bukti upgrade APK.
+Workflow rilis memerlukan pengakuan QA manual dan memverifikasi identitas serta
+sertifikat APK sebelum publikasi; lihat [`docs/android.md`](docs/android.md).
+
+**Pemeriksaan non-tes WM-25:** frontend TypeScript/Vite, Rust Android, Kotlin/AIDL
+dan APK debug ARM64 berhasil dikompilasi; `cargo check --all-targets` juga selesai
+(tidak menjalankan tes). Metadata APK menunjukkan
+`com.titotfp.wuwaid.debug`, versionCode 8, `0.4.0-debug`; signature v2 dan
+alignment native 16 KiB valid. SHA-256 APK debug:
+
+```text
+a997596c94157bd3b43a38ee9aea3d5b4ab0d167da064575f03475eb0ee1f2a8
+```
+
+Pemeriksaan metadata/build tersebut bukan bukti migrasi berjalan, upgrade
+in-place diterima Android, atau game bekerja; penerimaan perangkat dicatat terpisah.
+
+**Kandidat release WM-25 yang diterima sebelum perubahan branding:** APK ARM64 `0.4.0` / versionCode **8** berhasil
+dibangun memakai keystore asli pada 2026-10-04, dengan package
+`com.titotfp.wuwaid`. Pemeriksaan APK final menunjukkan satu signer dengan
+sertifikat yang sama dengan ketujuh APK publik lama; signature v2 dan alignment
+native 16 KiB valid. Lokasi:
+
+```text
+src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk
+```
+
+Ukuran **10.070.581 byte**; SHA-256:
+
+```text
+eab8430cf4bcbc734b81e98406e6bdb7474b644e625dd49f410e5f05d30f6f18
+```
+
+Signing/build bukan bukti update atau migrasi berhasil pada perangkat. APK tidak
+dipasang atau diuji oleh asisten.
+
+**Penerimaan perangkat WM-25 — 2026-10-04:** pengguna memberikan output
+`adb install -r` untuk kandidat release di atas dengan hasil **Success**, lalu
+menyatakan pengujian sudah dilakukan dan hasilnya **aman dan berfungsi semestinya**.
+WM-25 ditutup berdasarkan penerimaan pengguna tersebut. Pada penutupan itu,
+asisten tidak mengubah kode runtime/APK, menjalankan tes ulang, commit, push atau
+publikasi rilis. Kandidat branding berikutnya dicatat terpisah di bawah.
+
+Konfirmasi ini bersifat kualitatif. Versi aplikasi sebelum update, daftar skenario
+yang dijalankan, cakupan seluruh matriks di atas, fase crash recovery, hash berkas
+resmi sebelum/sesudah dan metrik performa tidak diberikan; tidak diklaim sebagai
+bukti exhaustive atau angka terukur. Checklist tetap menjadi panduan pengujian
+upgrade untuk rilis berikutnya.
+
+### Nama dan ikon aplikasi
+
+Nama aplikasi/launcher adalah **WuwaID Mobile**, bukan `WuwaIDMobile`.
+`productName`, judul window, label aplikasi Android dan label activity memakai
+nama yang sama. Package tetap `com.titotfp.wuwaid`; perubahan branding tidak
+mengganti identitas aplikasi, versi `0.4.0` / code 8 atau kunci signing.
+
+Art ikon berasal dari [ikon WuwaIDLauncher](https://github.com/TitoTFP/WuwaIDLauncher/blob/676c4a9b3b3f14ccb570d90252dc8972dbac8d13/src-tauri/icons/icon.png),
+dipin pada commit tersebut dan disimpan sebagai `src-tauri/app-icon.png`.
+PNG/ICO/ICNS dan aset launcher Android dibuat dengan `tauri icon`, termasuk
+legacy PNG semua density serta adaptive foreground/background. Drawable default
+Android yang tidak lagi dipakai dihapus. Cara regenerasi ada di
+[`docs/android.md`](docs/android.md).
+
+Pengguna melaporkan kandidat branding sebelumnya terpasang dengan sukses, tetapi
+ikon launcher terlalu zoom. Foreground adaptive sebelumnya memenuhi kanvas
+108×108; sekarang `src-tauri/app-icon.json` memilih SVG khusus yang menempatkan
+artwork 72×72 di tengahnya, dengan padding transparan 18 di setiap sisi.
+Koreksi awal 66×66 sudah diuji pengguna tetapi masih menyisakan bingkai putih;
+framing diperbesar sekitar 9% untuk memenuhi viewport launcher.
+Art asli untuk desktop/legacy tidak diganti.
+
+**Kandidat release perbaikan skala ikon:** build ARM64 berhasil; metadata APK
+final menampilkan `WuwaID Mobile` untuk aplikasi dan launcher activity. Kelima
+foreground PNG pada density mdpi–xxxhdpi cocok pixel-for-pixel dengan sumber
+berpadding; untuk xxxhdpi, artwork 288×288 berada di pusat kanvas 432×432.
+Preview mask bulat/kotak-membulat menunjukkan framing lebih lebar, tetapi
+merupakan simulasi, bukan screenshot perangkat. Signature v2, sertifikat rilis
+asli dan alignment native 16 KiB valid. Pengguna kemudian melaporkan update
+perangkat berhasil dan menerima framing terbaru dengan “Nice! Oke!”.
+
+APK terbaru menggunakan lokasi output yang sama dengan kandidat WM-25 di atas,
+sehingga hasil build tersebut kini menimpa file kandidat sebelumnya. Ukuran
+**10.476.933 byte**; SHA-256 APK terbaru:
+
+```text
+6710ce66966220ff5fad823534407c4d33b31593bc2d601eaa764fe225659a99
+```
+
+Penerimaan perangkat WM-25 di atas berlaku untuk kandidat dengan checksum
+sebelumnya, bukan bukti pengujian tampilan nama/ikon yang baru.
+
+Penerimaan branding dicatat terpisah: APK dengan checksum terbaru di atas
+berhasil dipasang dengan `adb install -r`, kemudian pengguna menyetujui hasilnya.
+Review pre-commit tidak mengubah kode aplikasi atau APK yang telah diterima;
+asisten tidak menjalankan ulang tes perangkat.
 
 ### Android: root langsung (WM-24)
 
@@ -315,10 +497,10 @@ di `src/mock-ipc.ts`; shell Tauri memakai perintah Rust dan event `wuwa-progress
 **Desktop Tauri tidak memasang PAK Android** dan menampilkan batas platform,
 bukan status perangkat simulasi.
 
-Di browser, pilih **Perawatan → Skenario simulasi** untuk mencoba sepuluh kondisi:
+Di browser, pilih **Perawatan → Skenario simulasi** untuk mencoba sebelas kondisi:
 siap, terpasang, game tidak ditemukan, versi tidak didukung, resource belum siap,
 Shizuku mati, izin Shizuku belum diberikan, root menunggu izin, root siap tanpa
-Shizuku, dan pemulihan tertunda. Semua tindakan browser tetap simulasi;
+Shizuku, pemulihan tertunda, dan pemasangan sebelum Tauri. Semua tindakan browser tetap simulasi;
 tidak ada penulisan ke game, permintaan root nyata, atau peluncuran game.
 
 Custom UID menerima teks/angka maksimal 32 unit UTF-16 tanpa pratinjau.
@@ -327,7 +509,7 @@ contoh mock, bukan nilai perangkat. Terapkan dari kondisi belum terpasang juga
 menandai patch terpasang dan sehat, sesuai alur native. Hambatan perangkat dan
 pemulihan tetap memblokir tindakan; uninstall mereset tampilannya. Font game tetap bawaan.
 
-State browser disimpan dengan key `wuwaidmobile.mock-state.v3`; skenario mereset
+State browser disimpan dengan key `wuwaidmobile.mock-state.v5`; skenario mereset
 data contoh dan custom UID. Ekspor diagnostik membedakan `mock: true` dan
 `mock: false`, serta backend Android atau desktop yang tidak didukung.
 
@@ -348,6 +530,10 @@ Operasi native: `install`, `repair`, `uninstall`, `request_permission`,
 Dashboard memisahkan status Shizuku asli (`shizuku`) dari metode terpilih
 (`access.method`: `shizuku`/`root`, `access.granted`). Kesiapan pemasangan,
 UID, repair, dan uninstall memakai grant metode terpilih, bukan wajib Shizuku.
+`game.packageName` adalah paket Global/Galaxy Store aktual. `patch.legacyPending`
+menandakan berkas sebelum Tauri; `repair` memilih migrasi offline untuk kondisi
+ini, atau pemulihan jurnal bila `recoveryPending` aktif. Browser juga menyediakan
+skenario `legacy`; state simulasi bukan sumber migrasi data Android.
 Diagnostik mencatat `android-root` atau `android-shizuku`, sesuai pilihan.
 Operasi mutasi bersamaan ditolak. Kontrak state berada di `src/model.ts`;
 installer/downloader berada di `src-tauri/src/pak/`, orkestrasi di

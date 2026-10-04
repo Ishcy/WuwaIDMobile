@@ -1,0 +1,107 @@
+name: Signed Android Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag, for example v0.4.0
+        required: true
+        type: string
+      upgrade_qa_completed:
+        description: Manual upgrade, migration, recovery and game QA passed with the release signing key
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Android build tools
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.3.13750724'
+      - name: Decode original release keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/wuwaid-mobile.jks"
+          chmod 600 "$RUNNER_TEMP/wuwaid-mobile.jks"
+      - run: npm ci
+      - name: Build signed ARM64 release APK
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/wuwaid-mobile.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          export NDK_HOME="$ANDROID_HOME/ndk/27.3.13750724"
+          npm run tauri android build -- --apk --target aarch64
+      - name: Verify upgrade identity and prepare artifacts
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, re, shutil, subprocess
+          tag = os.environ['RELEASE_TAG']
+          config = json.loads(pathlib.Path('src-tauri/tauri.conf.json').read_text())
+          if tag != 'v' + config['version']:
+              raise SystemExit('Tag does not match configured application version')
+          apks = list(pathlib.Path('src-tauri/gen/android/app/build/outputs/apk').glob('**/release/*.apk'))
+          if len(apks) != 1:
+              raise SystemExit('Expected exactly one ARM64 release APK')
+          apk = apks[0]
+          tools = pathlib.Path(os.environ['ANDROID_HOME']) / 'build-tools/36.0.0'
+          badging = subprocess.check_output([str(tools/'aapt2'), 'dump', 'badging', str(apk)], text=True)
+          identity = re.search(r"package: name='([^']+)' versionCode='([^']+)' versionName='([^']+)'", badging)
+          if not identity or identity.groups() != ('com.titotfp.wuwaid', str(config['bundle']['android']['versionCode']), config['version']):
+              raise SystemExit('Release APK does not have the expected upgrade identity')
+          signer = subprocess.check_output([str(tools/'apksigner'), 'verify', '--verbose', '--print-certs', str(apk)], text=True)
+          fingerprints = re.findall(r'certificate SHA-256 digest: ([0-9a-f]+)', signer)
+          if fingerprints != ['2cb1b4fed5446cf52018b5d56d58c379d7328022c1ba17278c19c0002e484df9']:
+              raise SystemExit('Release APK is not signed by the original published certificate')
+          subprocess.run([str(tools/'zipalign'), '-c', '-P', '16', '4', str(apk)], check=True)
+          shutil.copyfile(apk, 'WuwaID-Mobile-' + tag + '.apk')
+          PY
+          sha256sum "WuwaID-Mobile-${RELEASE_TAG}.apk" > SHA256sums.txt
+      - name: Upload signed candidate for manual QA
+        uses: actions/upload-artifact@v4
+        with:
+          name: wuwaidmobile-signed-${{ inputs.tag }}
+          path: |
+            WuwaID-Mobile-${{ inputs.tag }}.apk
+            SHA256sums.txt
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish approved release
+        if: inputs.upgrade_qa_completed
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          name: WuwaID Mobile ${{ inputs.tag }}
+          prerelease: ${{ startsWith(inputs.tag, 'v0.') }}
+          generate_release_notes: true
+          files: |
+            WuwaID-Mobile-${{ inputs.tag }}.apk
+            SHA256sums.txt
+      - name: Remove temporary keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/wuwaid-mobile.jks"

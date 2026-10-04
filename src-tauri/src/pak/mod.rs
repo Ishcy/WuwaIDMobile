@@ -1,4 +1,5 @@
 pub mod installer;
+mod legacy;
 #[cfg(test)]
 mod local_storage;
 pub mod model;

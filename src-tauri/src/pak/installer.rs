@@ -11,6 +11,7 @@ use super::model::{
     PATCH_DIRECTORY, PATCH_FILENAME, PRIORITY, SIGNATURE_FILENAME,
 };
 use super::storage::Storage;
+use super::legacy;
 use super::uid;
 
 const SCHEMA_VERSION: u8 = 1;
@@ -68,6 +69,8 @@ struct Journal {
     operation: Operation,
     before: Vec<Snapshot>,
     after: Vec<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    legacy: Option<legacy::Proof>,
 }
 
 pub fn discover(storage: &dyn Storage) -> PakResult<ResourceLayout> {
@@ -91,13 +94,16 @@ pub fn inspect(storage: &dyn Storage, layout: &ResourceLayout) -> PakResult<Inst
     let mut issues = Vec::new();
     let versions = resource_versions(storage)?;
     let mut lifecycle = Vec::new();
-    for (_, version) in versions {
-        lifecycle.extend(all_lifecycle_paths(&version));
+    for (_, version) in &versions {
+        lifecycle.extend(all_lifecycle_paths(version));
+        lifecycle.extend(legacy::lifecycle_paths(version));
     }
+    let legacy_paths: Vec<_> = versions.iter().flat_map(|(_, version)| legacy::paths(version)).collect();
     let current_lifecycle = artifact_lifecycle_paths(&layout.version);
     let mut metadata_paths = lifecycle.clone();
     metadata_paths.extend(paths.iter().cloned());
     metadata_paths.extend(current_lifecycle.iter().cloned());
+    metadata_paths.extend(legacy_paths.iter().cloned());
     metadata_paths.sort_unstable();
     metadata_paths.dedup();
     let metadata = storage.stat_many(&metadata_paths)?;
@@ -105,7 +111,15 @@ pub fn inspect(storage: &dyn Storage, layout: &ResourceLayout) -> PakResult<Inst
     let existing: HashSet<_> = metadata_paths.iter().zip(&metadata)
         .filter(|(_, stat)| stat.exists).map(|(path, _)| path.as_str()).collect();
     let recovery_pending = lifecycle.iter().any(|path| existing.contains(path.as_str()));
-    let installed = paths.iter().chain(&current_lifecycle).any(|path| existing.contains(path.as_str()));
+    let mut installed = paths.iter().chain(&current_lifecycle).any(|path| existing.contains(path.as_str()));
+    let mut legacy_pending = false;
+    for ((_, version), paths) in versions.iter().zip(legacy_paths.chunks_exact(3)) {
+        if paths.iter().any(|path| existing.contains(path.as_str())) {
+            legacy_pending = true;
+            installed = true;
+            issues.push(format!("Pemasangan sebelum rebuild Tauri ditemukan pada resource {version}. Pilih Migrasikan di Perawatan; berkas lama tidak diubah saat pemeriksaan."));
+        }
+    }
 
     let owner_path = target_path(&layout.version, Slot::Owner);
     let owner = match load_owner(storage, &layout.version) {
@@ -119,7 +133,7 @@ pub fn inspect(storage: &dyn Storage, layout: &ResourceLayout) -> PakResult<Inst
         .as_ref()
         .map(|owner| owner.release_tag.clone())
         .unwrap_or_else(|| layout.version.clone());
-    let conflicts = find_conflicting_mounts(storage, &layout.version)?;
+    let conflicts = find_conflicting_mounts(storage, &layout.version, legacy_pending)?;
     if !conflicts.is_empty() {
         issues.push(format!(
             "Conflicting custom mounts: {}",
@@ -132,7 +146,7 @@ pub fn inspect(storage: &dyn Storage, layout: &ResourceLayout) -> PakResult<Inst
 
     let mut custom_uid = None;
     match owner {
-        None if installed => issues.push(format!(
+        None if paths.iter().any(|path| existing.contains(path.as_str())) => issues.push(format!(
             "Installer artifacts exist without valid ownership metadata at {owner_path}"
         )),
         Some(owner) => {
@@ -152,6 +166,7 @@ pub fn inspect(storage: &dyn Storage, layout: &ResourceLayout) -> PakResult<Inst
         installed,
         healthy,
         recovery_pending,
+        legacy_pending,
         version,
         message: if issues.is_empty() {
             None
@@ -160,6 +175,174 @@ pub fn inspect(storage: &dyn Storage, layout: &ResourceLayout) -> PakResult<Inst
         },
         custom_uid,
     })
+}
+
+fn legacy_present(storage: &dyn Storage, version: &str) -> PakResult<bool> {
+    for path in legacy::paths(version) {
+        if storage.stat(&path)?.exists {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn ensure_no_legacy_lifecycle(storage: &dyn Storage, version: &str) -> PakResult<()> {
+    for path in legacy::lifecycle_paths(version) {
+        if storage.stat(&path)?.exists {
+            return Err(format!("Sisa transaksi versi lama ditemukan: {path}. Tidak ada jurnal rollback lama; berkas dipertahankan dan migrasi diblokir."));
+        }
+    }
+    Ok(())
+}
+
+fn validate_legacy_proof(proof: &legacy::Proof) -> PakResult<()> {
+    legacy::published(&proof.pak_sha256, proof.size)?;
+    if !valid_hash(&proof.pak_sha1, 20) || !valid_hash(&proof.signature_sha256, 32)
+        || !valid_hash(&proof.signature_sha1, 20)
+        || sha256_text(&legacy::mount_content(&proof.pak_sha1, &proof.signature_sha1)) != proof.mount_sha256
+    {
+        return Err("Legacy ownership proof does not describe a supported published installation".into());
+    }
+    Ok(())
+}
+
+fn verify_legacy(storage: &dyn Storage, version: &str) -> PakResult<legacy::Proof> {
+    validate_version(version)?;
+    ensure_no_legacy_lifecycle(storage, version)?;
+    let paths = legacy::paths(version);
+    let pak = checked_hashes(storage, &paths[0], true)?;
+    legacy::published(&pak.sha256, pak.size)?;
+    let signature = checked_hashes(storage, &paths[1], true)?;
+    if signature.size == 0 {
+        return Err("Signature pemasangan versi lama kosong; berkas dipertahankan.".into());
+    }
+    let content = storage.read_text(&paths[2])?;
+    let expected = legacy::mount_content(
+        pak.sha1.as_deref().expect("verified SHA-1"),
+        signature.sha1.as_deref().expect("verified SHA-1"),
+    );
+    if content != expected {
+        return Err("Mount versi lama tidak cocok dengan PAK/signature terpasang. Berkas dipertahankan; migrasi tidak menebak kepemilikan.".into());
+    }
+    let proof = legacy::Proof {
+        size: pak.size,
+        pak_sha256: pak.sha256,
+        pak_sha1: pak.sha1.expect("verified SHA-1").to_ascii_uppercase(),
+        signature_sha256: signature.sha256,
+        signature_sha1: signature.sha1.expect("verified SHA-1").to_ascii_uppercase(),
+        mount_sha256: checked_hash(storage, &paths[2], "sha256")?,
+    };
+    validate_legacy_proof(&proof)?;
+    Ok(proof)
+}
+
+fn cleanup_legacy(storage: &dyn Storage, version: &str, proof: &legacy::Proof) -> PakResult<()> {
+    validate_legacy_proof(proof)?;
+    ensure_no_legacy_lifecycle(storage, version)?;
+    let paths = legacy::paths(version);
+    let expected = [&proof.pak_sha256, &proof.signature_sha256, &proof.mount_sha256];
+    // Missing sources are allowed only after the exact new install has committed.
+    for (path, hash) in paths.iter().zip(expected) {
+        if storage.stat(path)?.exists && checked_hash(storage, path, "sha256")? != *hash {
+            return Err(format!("Berkas lama berubah setelah migrasi; dipertahankan: {path}"));
+        }
+    }
+    for index in [2, 0, 1] {
+        if storage.stat(&paths[index])?.exists {
+            if checked_hash(storage, &paths[index], "sha256")? != *expected[index] {
+                return Err(format!("Berkas lama berubah saat cleanup: {}", paths[index]));
+            }
+            storage.remove(&paths[index])?;
+        }
+    }
+    let directory = format!("{version}/{}", legacy::DIRECTORY);
+    if storage.stat(&directory)?.exists && storage.list(&directory)?.is_empty() {
+        storage.remove(&directory)?;
+    }
+    Ok(())
+}
+
+pub fn migrate_legacy(
+    storage: &dyn Storage,
+    layout: &ResourceLayout,
+    progress: &ProgressCallback,
+) -> PakResult<InstallStatus> {
+    recover_transactions(storage, layout, progress)?;
+    let mut migrations = Vec::new();
+    for (_, version) in resource_versions(storage)? {
+        if !legacy_present(storage, &version)? {
+            continue;
+        }
+        if paths_have_artifacts(storage, &version)? {
+            return Err(format!("Pemasangan lama dan baru berdampingan pada {version}; migrasi tidak menimpa salah satunya."));
+        }
+        let conflicts = find_conflicting_mounts(storage, &version, true)?;
+        if !conflicts.is_empty() {
+            return Err(format!("Mount lain menghalangi migrasi: {}", conflicts.join(", ")));
+        }
+        migrations.push((version.clone(), verify_legacy(storage, &version)?));
+    }
+    if !migrations.is_empty() {
+        storage.force_stop()?;
+    }
+    for (version, proof) in migrations {
+        if verify_legacy(storage, &version)? != proof {
+            return Err("Pemasangan lama berubah sebelum migrasi; tidak ditimpa.".into());
+        }
+        let old_paths = legacy::paths(&version);
+        let stages = stage_paths(&version);
+        let release = legacy::published(&proof.pak_sha256, proof.size)?;
+        let mount = mount_content(&proof.pak_sha1, &proof.signature_sha1);
+        let owner = Owner {
+            schema_version: SCHEMA_VERSION,
+            resource_version: version.clone(),
+            patch_directory: PATCH_DIRECTORY.into(),
+            pak_filename: PATCH_FILENAME.into(),
+            signature_filename: SIGNATURE_FILENAME.into(),
+            mount_filename: MOUNT_FILENAME.into(),
+            priority: PRIORITY,
+            release_tag: release.tag.clone(),
+            game_version: release.game_version.clone(),
+            asset_name: release.asset_name.clone(),
+            pak_sha256: proof.pak_sha256.clone(),
+            pak_sha1: proof.pak_sha1.clone(),
+            signature_sha256: proof.signature_sha256.clone(),
+            signature_sha1: proof.signature_sha1.clone(),
+            mount_sha256: sha256_text(&mount),
+            source_sha256: Some(proof.pak_sha256.clone()),
+            custom_uid: None,
+        };
+        validate_owner(&owner, &version)?;
+        let owner_json = serde_json::to_string(&owner).map_err(|error| error.to_string())?;
+        let expected = vec![Some(proof.pak_sha256.clone()), Some(proof.signature_sha256.clone()),
+            Some(sha256_text(&owner_json)), Some(owner.mount_sha256.clone())];
+        storage.mkdir(&format!("{version}/{PATCH_DIRECTORY}"))?;
+        notify(progress, 74, "Menyiapkan migrasi pemasangan versi lama");
+        let staged = (|| {
+            storage.copy(&old_paths[0], &stages[0])?;
+            storage.copy(&old_paths[1], &stages[1])?;
+            storage.write_text(&stages[2], &owner_json)?;
+            storage.write_text(&stages[3], &mount)?;
+            for (path, hash) in stages.iter().zip(&expected) {
+                if checked_hash(storage, path, "sha256")?.as_str() != hash.as_deref().expect("migration output") {
+                    return Err(format!("Berkas migrasi sementara berubah: {path}"));
+                }
+            }
+            if verify_legacy(storage, &version)? != proof {
+                return Err("Pemasangan lama berubah saat staging migrasi.".into());
+            }
+            Ok(())
+        })();
+        if let Err(error) = staged {
+            return Err(append_cleanup_error(error, clean_stages(storage, &stages, &expected)));
+        }
+        let migrated_layout = ResourceLayout { version: version.clone(), signature: String::new() };
+        commit_stages(storage, &migrated_layout, expected, Some(proof), progress)?;
+        if version != layout.version {
+            uninstall_current(storage, &migrated_layout, progress)?;
+        }
+    }
+    inspect(storage, layout)
 }
 
 pub fn install(
@@ -206,6 +389,7 @@ fn recover_transactions(
     validate_version(&layout.version)?;
     let mut pending = Vec::new();
     for (_, version) in resource_versions(storage)? {
+        ensure_no_legacy_lifecycle(storage, &version)?;
         if let Some(journal) = read_pending_journal(storage, &version)? {
             pending.push((version, journal));
         } else if has_artifact_lifecycle_files(storage, &version)? {
@@ -237,6 +421,29 @@ pub fn uninstall(
 ) -> PakResult<InstallStatus> {
     recover_transactions(storage, layout, progress)?;
     validate_version(&layout.version)?;
+    let versions = resource_versions(storage)?;
+    let mut has_legacy = false;
+    for (_, version) in &versions {
+        has_legacy |= legacy_present(storage, version)?;
+    }
+    if has_legacy {
+        migrate_legacy(storage, layout, progress)?;
+    }
+    for (_, version) in versions {
+        if load_owner(storage, &version)?.is_some() {
+            uninstall_current(storage, &ResourceLayout { version, signature: String::new() }, progress)?;
+        } else if paths_have_artifacts(storage, &version)? {
+            return Err("Refusing to uninstall unowned files in an older resource version".into());
+        }
+    }
+    inspect(storage, layout)
+}
+
+fn uninstall_current(
+    storage: &dyn Storage,
+    layout: &ResourceLayout,
+    progress: &ProgressCallback,
+) -> PakResult<InstallStatus> {
     ensure_no_lifecycle_files(storage, &layout.version)?;
 
     let owner = load_owner(storage, &layout.version)?;
@@ -257,6 +464,7 @@ pub fn uninstall(
         operation: Operation::Uninstall,
         before,
         after: vec![None; SLOTS.len()],
+        legacy: None,
     };
     validate_journal(&journal, &layout.version)?;
 
@@ -292,6 +500,9 @@ fn install_current(
     validate_version(&layout.version)?;
     validate_release(release, pak)?;
     ensure_no_lifecycle_files(storage, &layout.version)?;
+    if legacy_present(storage, &layout.version)? {
+        return Err("Migrasikan pemasangan versi lama di Perawatan sebelum memasang ulang atau mengubah UID.".into());
+    }
 
     let official_signature =
         find_official_signature(storage, &layout.version)?.ok_or_else(|| {
@@ -323,7 +534,7 @@ fn install_current(
             return Err(format!("Canonical installer target is a directory: {path}"));
         }
     }
-    let conflicts = find_conflicting_mounts(storage, &layout.version)?;
+    let conflicts = find_conflicting_mounts(storage, &layout.version, false)?;
     if !conflicts.is_empty() {
         return Err(format!(
             "Conflicting custom mounts: {}",
@@ -456,6 +667,17 @@ fn install_current(
     }
     notify(progress, 80, "Berkas sementara terverifikasi");
 
+    commit_stages(storage, layout, staged_hashes, None, progress)
+}
+
+fn commit_stages(
+    storage: &dyn Storage,
+    layout: &ResourceLayout,
+    staged_hashes: Vec<Option<String>>,
+    legacy: Option<legacy::Proof>,
+    progress: &ProgressCallback,
+) -> PakResult<InstallStatus> {
+    let stages = stage_paths(&layout.version);
     let before = match capture_snapshots(storage, &layout.version) {
         Ok(before) => before,
         Err(error) => {
@@ -469,6 +691,7 @@ fn install_current(
         operation: Operation::Install,
         before,
         after: staged_hashes,
+        legacy,
     };
     if let Err(error) = validate_journal(&journal, &layout.version)
         .and_then(|()| verify_journal_payload(storage, &layout.version, &journal))
@@ -624,7 +847,7 @@ fn strip_extension_ignore_case<'a>(name: &'a str, extension: &str) -> Option<&'a
         .then_some(&name[..split_at])
 }
 
-fn find_conflicting_mounts(storage: &dyn Storage, version: &str) -> PakResult<Vec<String>> {
+fn find_conflicting_mounts(storage: &dyn Storage, version: &str, allow_legacy: bool) -> PakResult<Vec<String>> {
     let mount_dir = format!("{version}/Mount");
     let stat = storage.stat(&mount_dir)?;
     if !stat.exists {
@@ -638,6 +861,7 @@ fn find_conflicting_mounts(storage: &dyn Storage, version: &str) -> PakResult<Ve
         validate_child_name(&entry.name)?;
         if entry.is_dir
             || entry.name.eq_ignore_ascii_case(MOUNT_FILENAME)
+            || (allow_legacy && entry.name == legacy::MOUNT)
             || entry.name.to_ascii_lowercase().starts_with("mountresource")
             || entry.name.to_ascii_lowercase().starts_with("mountlang_")
             || !entry.name.to_ascii_lowercase().ends_with(".txt")
@@ -967,6 +1191,16 @@ fn validate_journal(journal: &Journal, version: &str) -> PakResult<()> {
     for hash in journal.after.iter().flatten() {
         if !valid_hash(hash, 32) {
             return Err("Transaction journal contains an invalid staged hash".to_owned());
+        }
+    }
+    if let Some(proof) = &journal.legacy {
+        validate_legacy_proof(proof)?;
+        if journal.operation != Operation::Install || journal.before.iter().any(|snapshot| snapshot.exists)
+            || journal.after[0].as_deref() != Some(proof.pak_sha256.as_str())
+            || journal.after[1].as_deref() != Some(proof.signature_sha256.as_str())
+            || journal.after[3].as_deref() != Some(sha256_text(&mount_content(&proof.pak_sha1, &proof.signature_sha1)).as_str())
+        {
+            return Err("Legacy migration journal does not preserve the verified legacy payload".into());
         }
     }
     match journal.operation {
@@ -1311,6 +1545,9 @@ fn finalize_journal(storage: &dyn Storage, version: &str, journal: &Journal) -> 
         verify_committed_install(storage, version, journal)?;
     } else if !fully_applied(storage, version, journal)? {
         return Err("Cannot finalize an incomplete installer transaction".to_owned());
+    }
+    if let Some(proof) = &journal.legacy {
+        cleanup_legacy(storage, version, proof)?;
     }
     let stages = stage_paths(version);
     let backups = backup_paths(version);

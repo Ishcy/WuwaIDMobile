@@ -19,6 +19,7 @@ const scenarios: Array<{ id: Scenario; label: string }> = [
   { id: "root_permission", label: "Root menunggu izin" },
   { id: "root_ready", label: "Root siap tanpa Shizuku" },
   { id: "recovery", label: "Pemulihan diperlukan" },
+  { id: "legacy", label: "Pemasangan sebelum Tauri" },
 ];
 
 function button(
@@ -80,7 +81,7 @@ export function renderTools(state: UiState): string {
     d.game.installed &&
     d.access.granted &&
     d.resource.ready &&
-    d.patch.recoveryPending;
+    (d.patch.recoveryPending || d.patch.legacyPending);
   const canRepair =
     !state.busy && (canRecover || (dependenciesReady && d.patch.installed));
   const currentScenario: Scenario = !d.game.installed
@@ -97,6 +98,8 @@ export function renderTools(state: UiState): string {
             ? "resource_missing"
             : d.patch.recoveryPending
               ? "recovery"
+              : d.patch.legacyPending
+                ? "legacy"
               : d.patch.installed
                 ? "installed"
                 : d.access.method === "root" ? "root_ready" : "ready";
@@ -116,12 +119,12 @@ export function renderTools(state: UiState): string {
       icon: "refresh",
     },
     {
-      name: "Perbaiki pemasangan",
+      name: d.patch.legacyPending && !d.patch.recoveryPending ? "Migrasi versi lama" : "Perbaiki pemasangan",
       detail: d.patch.recoveryPending
         ? "Pulihkan transaksi tertunda."
-        : "Periksa dan pulihkan paket.",
+        : d.patch.legacyPending ? "Verifikasi dan migrasikan berkas lama tanpa unduhan." : "Periksa dan pulihkan paket.",
       action: "repair",
-      label: "Perbaiki",
+      label: d.patch.legacyPending && !d.patch.recoveryPending ? "Migrasikan" : "Perbaiki",
       disabled: !canRepair,
       icon: "shield",
     },

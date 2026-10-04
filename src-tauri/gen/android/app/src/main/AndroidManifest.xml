@@ -2,6 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <queries>
         <package android:name="com.kurogame.wutheringwaves.global" />
+        <package android:name="com.kurogame.wutheringwaves.samsung" />
         <package android:name="moe.shizuku.privileged.api" />
     </queries>
     <uses-permission android:name="android.permission.INTERNET" />

@@ -16,6 +16,7 @@ private val ownedFiles = buildSet {
     add("$path.new")
     add("$path.bak")
   }
+  addAll(listOf("wuwaindonesia/WuWaID_99_P.pak", "wuwaindonesia/WuWaID_99_P.sig", "Mount/wuwaindonesia.txt"))
 }
 
 internal fun requireWritableTarget(
@@ -29,7 +30,7 @@ internal fun requireWritableTarget(
     throw SecurityException("Mutation requires a numeric game resource version")
   }
   val relative = path.substring(separator + 1)
-  val directory = (allowPatchRoot && relative == "wuwaid") ||
+  val directory = (allowPatchRoot && (relative == "wuwaid" || relative == "wuwaindonesia")) ||
     (allowMountDirectory && relative == "Mount")
   if (!directory && (directoryOnly || relative !in ownedFiles)) {
     throw SecurityException("Mutation is restricted to WuwaID-owned resource paths")
@@ -37,7 +38,19 @@ internal fun requireWritableTarget(
 }
 
 class StorageUserService : IStorageUserService.Stub() {
-  private val files = ResourceFiles(File(GAME_FILES))
+  private var gamePackage = GamePackages.GLOBAL
+  private var resourceRoot = GamePackages.resources(gamePackage).path
+  private var files = ResourceFiles(GamePackages.files(gamePackage))
+
+  @Synchronized
+  override fun selectGame(packageName: String?) {
+    require(packageName != null && packageName in GamePackages.supported) { "Unsupported Wuthering Waves package" }
+    if (gamePackage != packageName) {
+      gamePackage = packageName
+      resourceRoot = GamePackages.resources(packageName).path
+      files = ResourceFiles(GamePackages.files(packageName))
+    }
+  }
 
   @Synchronized
   override fun metadata(operation: String?, first: String?, second: String?, requestId: Long): Bundle =
@@ -53,7 +66,17 @@ class StorageUserService : IStorageUserService.Stub() {
       try {
         Bundle().apply {
           putInt(KEY_EXIT_CODE, 0)
-          putByteArray(KEY_STDOUT, files.metadata(requireNotNull(operation), first, second))
+          val stdout = if (operation == "detect_game") {
+            require(second == null && first != null && first.length <= 256) { "Invalid game selection" }
+            val candidates = org.json.JSONArray(first)
+            require(candidates.length() in 1..GamePackages.supported.size) { "Invalid game selection count" }
+            val selected = GamePackages.choose((0 until candidates.length()).map { candidates.getString(it) })
+            selectGame(selected)
+            org.json.JSONObject().put("packageName", selected).toString().toByteArray(Charsets.UTF_8)
+          } else {
+            files.metadata(requireNotNull(operation), first, second)
+          }
+          putByteArray(KEY_STDOUT, stdout)
           putByteArray(KEY_STDERR, byteArrayOf())
         }
       } catch (error: Exception) {
@@ -93,7 +116,7 @@ class StorageUserService : IStorageUserService.Stub() {
       if (first != null) add(first)
       if (second != null) add(second)
     }
-    val command = arrayListOf("/system/bin/sh", "-c", script, "wuwaid-storage", RESOURCE_ROOT)
+    val command = arrayListOf("/system/bin/sh", "-c", script, "wuwaid-storage", resourceRoot)
     command.addAll(arguments)
     val process = try {
       ProcessBuilder(command).start()
@@ -241,8 +264,6 @@ class StorageUserService : IStorageUserService.Stub() {
   }
 
   companion object {
-    private const val GAME_FILES = "/storage/emulated/0/Android/data/com.kurogame.wutheringwaves.global/files"
-    private const val RESOURCE_ROOT = "/storage/emulated/0/Android/data/com.kurogame.wutheringwaves.global/files/UE4Game/Client/Client/Saved/Resources"
     private const val MAX_PATH_LENGTH = 4096
     private const val MAX_METADATA_BYTES = 256 * 1024
     private const val MAX_ERROR_BYTES = 16 * 1024
@@ -255,7 +276,11 @@ class StorageUserService : IStorageUserService.Stub() {
     private const val KEY_STDERR = "stderr"
 
     private val ROOT_CHECK = shell("""
-EXPECTED_FILES=$(readlink -f -- "/storage/emulated/0/Android/data/com.kurogame.wutheringwaves.global/files") || { echo 'game files directory is unavailable' >&2; exit 1; }
+case "§1" in
+  /storage/emulated/0/Android/data/com.kurogame.wutheringwaves.global/files/UE4Game/Client/Client/Saved/Resources|/storage/emulated/0/Android/data/com.kurogame.wutheringwaves.samsung/files/UE4Game/Client/Client/Saved/Resources) ;;
+  *) echo 'unsupported game resource root' >&2; exit 1 ;;
+esac
+EXPECTED_FILES=$(readlink -f -- "§{1%/UE4Game/Client/Client/Saved/Resources}") || { echo 'game files directory is unavailable' >&2; exit 1; }
 [ -d "§EXPECTED_FILES" ] && [ "§ROOT" = "§EXPECTED_FILES/UE4Game/Client/Client/Saved/Resources" ] || { echo 'resource root is not the expected game directory' >&2; exit 1; }
 """)
 
@@ -347,10 +372,15 @@ cat > "§TARGET" || { echo 'resource write failed' >&2; exit 1; }
 check_rel "§REL" || exit 1
 """)
 
-    private const val FORCE_STOP_SCRIPT = """
+    private val FORCE_STOP_SCRIPT = shell("""
 set -f
-am force-stop com.kurogame.wutheringwaves.global || { echo 'unable to force-stop Wuthering Waves' >&2; exit 1; }
-"""
+case "§1" in
+  /storage/emulated/0/Android/data/com.kurogame.wutheringwaves.global/files/UE4Game/Client/Client/Saved/Resources) GAME_PACKAGE=com.kurogame.wutheringwaves.global ;;
+  /storage/emulated/0/Android/data/com.kurogame.wutheringwaves.samsung/files/UE4Game/Client/Client/Saved/Resources) GAME_PACKAGE=com.kurogame.wutheringwaves.samsung ;;
+  *) echo 'unsupported game resource root' >&2; exit 1 ;;
+esac
+am force-stop "§GAME_PACKAGE" || { echo 'unable to force-stop Wuthering Waves' >&2; exit 1; }
+""")
 
     private fun shell(script: String): String = script.replace('§', '$')
   }

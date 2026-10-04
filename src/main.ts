@@ -87,6 +87,8 @@ function renderHome() {
     primary = { action: "setup-shizuku", label: "Buka Shizuku" };
   else if (!d.access.granted)
     primary = { action: "request_permission", label: "Berikan izin Shizuku" };
+  else if (d.patch.legacyPending || d.patch.recoveryPending)
+    primary = { action: "tools", label: "Buka Perawatan" };
   else if (d.mode === "native" && !d.release)
     primary = { action: "refresh", label: "Muat ulang rilis" };
   else if (!compatibleGameVersion(d, d.game.version))
@@ -111,7 +113,7 @@ function renderHome() {
       value: !d.platformSupported
         ? "Hanya tersedia di Android"
         : d.game.installed
-          ? `Global · ${d.game.version}`
+          ? `${d.game.packageName.endsWith(".samsung") ? "Galaxy Store" : "Global"} · ${d.game.version}`
           : "Belum terpasang",
       ok: d.game.installed && compatibleGameVersion(d, d.game.version),
       icon: "game",

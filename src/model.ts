@@ -9,6 +9,7 @@ export type Scenario =
   | "permission"
   | "root_permission"
   | "root_ready"
+  | "legacy"
   | "recovery";
 export type Operation =
   | "install"
@@ -45,6 +46,7 @@ export interface Dashboard {
     installed: boolean;
     healthy: boolean;
     recoveryPending: boolean;
+    legacyPending: boolean;
     version: string;
     message?: string | null;
   };
@@ -107,18 +109,7 @@ export function readiness(d: Dashboard): {
     return {
       ready: false,
       label: "Game belum ditemukan",
-      detail: "Pasang Wuthering Waves Global, lalu periksa ulang.",
-    };
-  if (
-    d.mode === "native" &&
-    d.access.granted &&
-    !d.release
-  )
-    return {
-      ready: false,
-      label: "Rilis belum tersedia",
-      detail:
-        d.blocker ?? "Periksa koneksi, lalu muat ulang rilis.",
+      detail: "Pasang Wuthering Waves Global atau Galaxy Store, lalu periksa ulang.",
     };
   if (d.access.method === "root" && !d.access.granted)
     return {
@@ -138,6 +129,23 @@ export function readiness(d: Dashboard): {
       ready: false,
       label: "Izin diperlukan",
       detail: "Berikan izin Shizuku.",
+    };
+  if (d.resource.ready && (d.patch.legacyPending || d.patch.recoveryPending))
+    return {
+      ready: false,
+      label: d.patch.recoveryPending ? "Perlu pemulihan" : "Pemasangan versi lama",
+      detail: d.patch.message ?? "Jalankan migrasi atau pemulihan di Perawatan. Tidak perlu mengunduh rilis untuk tindakan ini.",
+    };
+  if (
+    d.mode === "native" &&
+    d.access.granted &&
+    !d.release
+  )
+    return {
+      ready: false,
+      label: "Rilis belum tersedia",
+      detail:
+        d.blocker ?? "Periksa koneksi, lalu muat ulang rilis.",
     };
   if (!compatibleGameVersion(d, d.game.version))
     return {

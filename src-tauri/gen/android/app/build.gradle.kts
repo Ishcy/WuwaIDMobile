@@ -1,4 +1,6 @@
 import java.util.Properties
+import java.security.KeyStore
+import java.security.MessageDigest
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -14,6 +16,36 @@ val tauriProperties = Properties().apply {
     }
 }
 
+val releaseStorePath = providers.environmentVariable("ANDROID_KEYSTORE_PATH").orNull
+val releaseStorePassword = providers.environmentVariable("ANDROID_KEYSTORE_PASSWORD").orNull
+val releaseKeyAlias = providers.environmentVariable("ANDROID_KEY_ALIAS").orNull
+val releaseKeyPassword = providers.environmentVariable("ANDROID_KEY_PASSWORD").orNull
+val releaseSigningAvailable = listOf(releaseStorePath, releaseStorePassword, releaseKeyAlias, releaseKeyPassword)
+    .all { !it.isNullOrBlank() }
+
+val verifyUpgradeSigning = tasks.register("verifyUpgradeSigning") {
+    notCompatibleWithConfigurationCache("Validates the original private signing keystore at execution time.")
+    doLast {
+        check(releaseSigningAvailable) { "Release requires the original ANDROID_KEYSTORE_PATH, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD; never replace the published signing key." }
+        val store = KeyStore.getInstance(KeyStore.getDefaultType())
+        file(requireNotNull(releaseStorePath)).inputStream().use {
+            store.load(it, requireNotNull(releaseStorePassword).toCharArray())
+        }
+        val certificate = store.getCertificate(requireNotNull(releaseKeyAlias))
+            ?: error("Release signing alias has no certificate")
+        val fingerprint = MessageDigest.getInstance("SHA-256")
+            .digest(certificate.encoded).joinToString("") { "%02x".format(it) }
+        check(fingerprint == "2cb1b4fed5446cf52018b5d56d58c379d7328022c1ba17278c19c0002e484df9") {
+            "Release certificate differs from published WuwaIDMobile APKs; an in-place upgrade would fail."
+        }
+        check(tauriProperties.getProperty("tauri.android.versionCode", "0").toInt() > 7) {
+            "Release versionCode must exceed the last pre-Tauri release (7)."
+        }
+    }
+}
+tasks.matching { it.name.startsWith("pre") && it.name.endsWith("ReleaseBuild") }
+    .configureEach { dependsOn(verifyUpgradeSigning) }
+
 android {
     compileSdk = 36
     namespace = "com.titotfp.wuwaid"
@@ -26,8 +58,20 @@ android {
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
     }
+    signingConfigs {
+        if (releaseSigningAvailable) {
+            create("release") {
+                storeFile = file(requireNotNull(releaseStorePath))
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
     buildTypes {
         getByName("debug") {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
             manifestPlaceholders["usesCleartextTraffic"] = "true"
             isDebuggable = true
             isJniDebuggable = true
@@ -40,6 +84,7 @@ android {
             }
         }
         getByName("release") {
+            signingConfig = signingConfigs.findByName("release")
             optimization {
                enable = true
             }

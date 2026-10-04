@@ -2,6 +2,47 @@
 
 ## Unreleased
 
+- Fix the launcher icon appearing over-zoomed on the user's device. Use a separate
+  Android foreground SVG with centered 72×72 artwork inside the 108×108 adaptive
+  canvas, preserving transparent padding through icon regeneration. Enlarge the
+  initial 66×66 correction by about 9% after user feedback about white borders.
+  Keep original desktop/legacy artwork and app identity unchanged. Verify padded
+  foregrounds in all five densities inside the signed APK and inspect simulated
+  masks. The user accepted the final framing after a successful device update.
+
+- Restore the display name **WuwaID Mobile** in Tauri and Android app/activity
+  labels. Replace template icons with the pinned WuwaIDLauncher artwork, regenerate
+  desktop and Android legacy/adaptive icons, and remove unused default drawables.
+  Keep package/version/signing identity unchanged. Build a new signed ARM64 APK;
+  verify final labels, all five-density launcher/foreground image pixels, original
+  certificate, v2 signing and 16 KiB alignment. Record the user's device acceptance
+  for the latest branding APK separately from the preceding WM-25 candidate.
+
+- Preserve the published Android release identity for the Tauri rebuild:
+  version 0.4.0 / versionCode 8, original package and pinned release certificate.
+  Restore original-keystore signing inputs and reject incompatible release signing.
+  Isolate debug APKs with `.debug`; require explicit manual upgrade acceptance and
+  APK identity/certificate verification in the signed release workflow.
+- Detect pre-Tauri `wuwaindonesia` installations without mutating during refresh.
+  Add explicit offline migration using pinned historical release SHA-256/size,
+  exact mount/SHA-1 verification and the existing transaction engine. Retain old
+  sources until the new owned set commits; journal hash-checked resumable cleanup.
+  Refuse ambiguous layouts, unknown payloads and orphan legacy transaction files.
+  Remove verified inactive-resource sets and uninstall owned sets across resources.
+- Restore Galaxy Store game discovery, storage routing and launch/force-stop,
+  preserve Global-first materialized selection, and freeze the selected package
+  for the app session across Root/Shizuku switches.
+- Compile frontend, Rust (including existing test targets without execution),
+  Kotlin/AIDL and debug ARM64 APK; inspect all seven historical published APK
+  identities/certificates and verify debug APK v2 signing and 16 KiB alignment.
+  Build a release ARM64 upgrade candidate with the original keystore subsequently
+  supplied by the user; verify final package/version, the original certificate,
+  v2 signing and 16 KiB alignment. No tests were run by the assistant.
+  The user reported successful release APK installation and completed device QA
+  with safe, correct operation; WM-25 is accepted on that confirmation. No
+  exhaustive scenario coverage, pre-upgrade version, official-file hash comparison
+  or quantitative measurements were supplied. No runtime changes after acceptance.
+
 - Support direct root access through an explicit `su` permission request and a
   non-daemon libsu 6.0.0 Binder service, without requiring Shizuku.
   Reuse the guarded storage engine, PFD streaming, ownership, and transactions.

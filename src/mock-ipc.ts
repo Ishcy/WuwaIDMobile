@@ -10,7 +10,7 @@ import {
   type Scenario,
 } from "./model";
 
-const STORAGE_KEY = "wuwaidmobile.mock-state.v4";
+const STORAGE_KEY = "wuwaidmobile.mock-state.v5";
 const GAME_VERSION = "3.7.0";
 const PACKAGE_NAME = "com.kurogame.wutheringwaves.global";
 
@@ -30,6 +30,7 @@ function seed(): Dashboard {
       installed: false,
       healthy: false,
       recoveryPending: false,
+      legacyPending: false,
       version: CONTENT_VERSION,
     },
     uid: { original: "900123456", custom: null },
@@ -76,6 +77,7 @@ function validDashboard(value: unknown): value is Dashboard {
     typeof d.patch.installed === "boolean" &&
     typeof d.patch.healthy === "boolean" &&
     typeof d.patch.recoveryPending === "boolean" &&
+    typeof d.patch.legacyPending === "boolean" &&
     typeof d.patch.version === "string" &&
     !!d.uid &&
     typeof d.uid.original === "string" &&
@@ -139,6 +141,10 @@ function scenarioState(scenario: Scenario): Dashboard {
     case "installed":
       next.patch.installed = true;
       next.patch.healthy = true;
+      break;
+    case "legacy":
+      next.patch.installed = true;
+      next.patch.legacyPending = true;
       break;
     case "game_missing":
       next.game.installed = false;
@@ -262,22 +268,26 @@ async function perform(
         next.patch.installed = true;
         next.patch.healthy = true;
         next.patch.recoveryPending = false;
+        next.patch.legacyPending = false;
         break;
       case "repair":
         next.patch.installed = true;
         next.patch.healthy = true;
         next.patch.recoveryPending = false;
+        next.patch.legacyPending = false;
         break;
       case "uninstall":
         next.patch.installed = false;
         next.patch.healthy = false;
         next.patch.recoveryPending = false;
+        next.patch.legacyPending = false;
         next.uid.custom = null;
         break;
       case "apply_uid":
         next.patch.installed = true;
         next.patch.healthy = true;
         next.patch.recoveryPending = false;
+        next.patch.legacyPending = false;
         next.uid.custom = uidText!;
         break;
       case "restore_uid":

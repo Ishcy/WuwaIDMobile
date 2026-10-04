@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+#[cfg(any(not(target_os = "android"), test))]
 pub const GAME_PACKAGE: &str = "com.kurogame.wutheringwaves.global";
 pub const PATCH_DIRECTORY: &str = "wuwaid";
 pub const PATCH_FILENAME: &str = "WuwaID_99_P.pak";
@@ -55,6 +56,7 @@ pub struct FileHashes {
 pub struct DeviceProbe {
     pub game_installed: bool,
     pub game_version: String,
+    pub game_package: String,
     pub shizuku_running: bool,
     pub shizuku_granted: bool,
     pub access_method: String,
@@ -70,6 +72,7 @@ pub struct InstallStatus {
     pub installed: bool,
     pub healthy: bool,
     pub recovery_pending: bool,
+    pub legacy_pending: bool,
     pub version: String,
     pub message: Option<String>,
     // The dashboard exposes this metadata in uid.custom, not patch.
