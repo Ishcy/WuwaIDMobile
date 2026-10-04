@@ -10,12 +10,12 @@ dan Vite; shell native menggunakan Rust. Proyek Android berada di
 Frontend minimalis dengan palet tinta–lavender, tanpa meniru antarmuka APK
 referensi. Tiga layar:
 
-- **Beranda:** status game, Shizuku, resource, dan rilis; unduh/pasang ulang
+- **Beranda:** status game, metode akses (Shizuku/root), resource, dan rilis; unduh/pasang ulang
   terjemahan dengan progres dan pemeriksaan kompatibilitas.
 - **Kustomisasi:** UID kustom native di Android dan simulasi di browser, dengan
   penerapan dan Reset tanpa pratinjau. Hanya teks tampilan yang berubah, bukan UID akun.
-- **Perawatan:** pemeriksaan ulang, pemulihan transaksi, ekspor diagnostik JSON,
-  dan penghapusan berkas milik aplikasi dengan konfirmasi.
+- **Perawatan:** pilihan Shizuku/root, pemeriksaan ulang, pemulihan transaksi,
+  ekspor diagnostik JSON, dan penghapusan berkas milik aplikasi dengan konfirmasi.
 - Navigasi horizontal di desktop dan dock bawah pada layar Android.
 - **Terang / Gelap / Sistem** tersedia di header. Default mengikuti tema sistem;
   pilihan disimpan lokal dengan key `wuwaidmobile.theme` dan diterapkan sebelum
@@ -49,8 +49,11 @@ salinan privat lalu mengemas ulang PAK; berkas sumber rilis tetap utuh.
 
 1. Pasang **Wuthering Waves Global** (`com.kurogame.wutheringwaves.global`).
 2. Buka game dan selesaikan unduhan resource, termasuk paket bahasa Inggris.
-3. Pasang dan jalankan [Shizuku](https://shizuku.rikka.app/), lalu berikan izin
-   ke WuwaIDMobile melalui tombol **Berikan izin Shizuku**.
+3. Pilih metode akses di **Perawatan**:
+   - **Shizuku** (default): pasang dan jalankan [Shizuku](https://shizuku.rikka.app/),
+     lalu tekan **Berikan izin Shizuku**.
+   - **Root**: tekan **Gunakan Root**, lalu **Berikan izin root** dan izinkan
+     WuwaIDMobile melalui pengelola root. Tidak perlu memasang atau menjalankan Shizuku.
 4. Periksa kembali perangkat, lalu pilih **Pasang terjemahan**.
 
 Backend menemukan versi resource numerik yang sudah termaterialisasi dan pasangan
@@ -92,10 +95,12 @@ perbaikan memasang ulang rilis latest yang kompatibel.
 Residu `.new`/`.bak` tanpa jurnal valid tidak dihapus otomatis: aplikasi
 menolak menebak kepemilikan berkas dan menampilkan kondisi pemulihan terhalang.
 
-Bridge Kotlin menggunakan **Shizuku UserService + AIDL**, bukan API private
-`newProcess`. PAK mengalir melalui pipe `ParcelFileDescriptor`, tanpa base64
-atau buffer sebesar PAK. Guard di aplikasi dan service privileged membatasi
-mutasi ke path WuwaID pada versi numerik serta menolak traversal/symlink.
+Bridge Kotlin memakai **Shizuku UserService + AIDL** atau root service `su` +
+Binder melalui [libsu 6.0.0](https://github.com/topjohnwu/libsu/tree/6.0.0).
+Keduanya menjalankan `StorageUserService` yang sama, bukan installer terpisah
+atau API private `newProcess`. PAK mengalir melalui pipe `ParcelFileDescriptor`,
+tanpa base64 atau buffer sebesar PAK. Guard di aplikasi dan service privileged
+membatasi mutasi ke path WuwaID pada versi numerik serta menolak traversal/symlink.
 
 Shizuku harus menyediakan server API **12 atau lebih baru**. Permintaan izin
 bersifat asinkron: binder mati atau plugin dihancurkan menolak permintaan yang
@@ -139,13 +144,57 @@ Solaris-3** tampil dalam Bahasa Indonesia tanpa dialog error pada layar tersebut
 Pengujian gameplay untuk UID kustom dijelaskan di bawah; belum memeriksa seluruh
 konten terjemahan.
 
+### Android: root langsung (WM-24)
+
+Root hanya diminta oleh **Berikan izin root**. Membuka aplikasi, memilih metode,
+refresh, dan diagnostik tidak menjalankan `su` atau memunculkan dialog root.
+Pilihan metode disimpan; grant root tidak disimpan sebagai boolean permanen.
+Setelah aplikasi dibuka ulang atau root service putus, tekan tombol izin lagi.
+Pengelola root dapat mengingat keputusan izin sehingga dialognya tidak selalu muncul.
+
+Shell `su` diverifikasi sebagai root, lalu libsu meluncurkan service non-daemon.
+Service memeriksa UID 0 sebelum memberikan Binder. Shell permintaan ditutup
+setelah bind; service dilepas ketika aplikasi ditutup. Timeout verifikasi shell
+60 detik, bind 15 detik. Penolakan izin, `su` tidak tersedia, callback lama,
+Binder mati, dan destroy tidak mengaktifkan akses palsu atau pindah otomatis ke
+Shizuku. Pergantian metode diblokir selama operasi, tanpa mengubah file game.
+Allowlist mutasi, hash, ownership, journal, rollback, dan pemulihan tetap sama.
+Tidak ada perubahan SELinux, permission direktori game secara rekursif, atau daemon permanen.
+
+Smoke host-adapted memverifikasi delapan skenario lifecycle memakai sumber
+`RootSession`/`RootStorageService`: probe pasif, penolakan/retry izin, Binder mati,
+callback lama, destroy, destroy saat bind, UID root, dan pelepasan worker/shell.
+UI browser memverifikasi grant root tanpa Shizuku, Apply/Reset, uninstall,
+pergantian metode, serta tombol terkunci saat busy. Adapter host dan mock browser
+**bukan** bukti `su`, Binder, FUSE, SELinux, atau gameplay Android asli.
+
+**Tes perangkat hanya oleh pengguna:** coba Root dengan Shizuku tidak aktif;
+pastikan refresh tidak meminta izin; tolak lalu izinkan root; pasang terjemahan,
+Terapkan/Reset UID, Perbaiki/Hapus; buka game; ulangi setelah aplikasi ditutup;
+dan kembali ke Shizuku. Periksa hash file resmi sebelum/sesudah. Dukungan profil
+tetap menggunakan path game utama `/storage/emulated/0`, seperti backend sebelumnya.
+
+**Verifikasi lokal WM-24:** 24 tes Rust lulus, termasuk transisi grant root,
+isolasi izin metode terpilih, dan penolakan ketika game/resource tidak siap.
+Build frontend dan APK debug ARM64, signature v2, serta alignment 16 KiB lulus.
+APK untuk pengujian pengguna:
+`src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk`.
+SHA-256: `6aa1ee48678687f3b72c881d544a4f795d3c71d0325363a956330b6a0876a64d`.
+APK ini belum dipasang atau diuji pada perangkat oleh assistant.
+
+**Verifikasi perangkat WM-24 (2026-10-04, oleh pengguna):** APK di atas berhasil
+dipasang dengan `adb install -r`; pengguna menyatakan hasil tes **aman dan bekerja
+semestinya**. Ini konfirmasi kualitatif, bukan hasil tes perangkat oleh assistant.
+Tidak ada trace baru, angka performa, checklist skenario terperinci, atau hash
+resource resmi sebelum/sesudah yang dilaporkan.
+
 ### Android: UID kustom
 
 **Kustomisasi → Terapkan** tidak memerlukan pemasangan terjemahan manual
 terlebih dahulu. Saat belum terpasang, backend mengambil PAK rilis terverifikasi
 (atau cache yang diverifikasi ulang), menyiapkan UID, lalu memasang terjemahan
 beserta UID dalam satu transaksi. Saat sudah terpasang, transaksi yang sama
-mengganti pilihan UID. Game, izin Shizuku, resource, dan rilis kompatibel tetap
+mengganti pilihan UID. Game, izin metode terpilih (Shizuku/root), resource, dan rilis kompatibel tetap
 wajib siap; pemasangan rusak atau transaksi tertunda harus diperbaiki lewat
 **Perawatan**.
 
@@ -173,7 +222,7 @@ berkas milik aplikasi. Pemulihan transaksi tidak memerlukan repack atau jaringan
 
 Aplikasi tidak membaca nomor UID akun. Android menampilkan **UID asli game**
 sebagai label bawaan; nomor contoh hanya dipakai oleh mock browser.
-SQLite dan pengolahan PAK berjalan di cache privat Rust; bridge Shizuku hanya
+SQLite dan pengolahan PAK berjalan di cache privat Rust; bridge privileged hanya
 menulis berkas WuwaID yang dijaga oleh aturan kepemilikan.
 
 **Verifikasi perangkat (2026-10-03):** APK debug ARM64 dipasang pada SM-A525F
@@ -266,10 +315,11 @@ di `src/mock-ipc.ts`; shell Tauri memakai perintah Rust dan event `wuwa-progress
 **Desktop Tauri tidak memasang PAK Android** dan menampilkan batas platform,
 bukan status perangkat simulasi.
 
-Di browser, pilih **Perawatan → Skenario simulasi** untuk mencoba delapan kondisi:
+Di browser, pilih **Perawatan → Skenario simulasi** untuk mencoba sepuluh kondisi:
 siap, terpasang, game tidak ditemukan, versi tidak didukung, resource belum siap,
-Shizuku mati, izin belum diberikan, dan pemulihan tertunda. Semua tindakan browser
-tetap simulasi; tidak ada penulisan ke game atau peluncuran game.
+Shizuku mati, izin Shizuku belum diberikan, root menunggu izin, root siap tanpa
+Shizuku, dan pemulihan tertunda. Semua tindakan browser tetap simulasi;
+tidak ada penulisan ke game, permintaan root nyata, atau peluncuran game.
 
 Custom UID menerima teks/angka maksimal 32 unit UTF-16 tanpa pratinjau.
 UID bawaan `900123456`, versi game `3.7.0`, dan konten `3.7.0-R2` adalah data
@@ -294,13 +344,17 @@ data contoh dan custom UID. Ekspor diagnostik membedakan `mock: true` dan
 | `wuwa_ui_trace` | `requestId`, `event`, `frontendUs` | —; fixed events, recording disabled by native release builds |
 
 Operasi native: `install`, `repair`, `uninstall`, `request_permission`,
-`launch_game`, `apply_uid`, dan `restore_uid`.
+`request_root`, `use_root`, `use_shizuku`, `launch_game`, `apply_uid`, dan `restore_uid`.
+Dashboard memisahkan status Shizuku asli (`shizuku`) dari metode terpilih
+(`access.method`: `shizuku`/`root`, `access.granted`). Kesiapan pemasangan,
+UID, repair, dan uninstall memakai grant metode terpilih, bukan wajib Shizuku.
+Diagnostik mencatat `android-root` atau `android-shizuku`, sesuai pilihan.
 Operasi mutasi bersamaan ditolak. Kontrak state berada di `src/model.ts`;
 installer/downloader berada di `src-tauri/src/pak/`, orkestrasi di
 `src-tauri/src/native.rs`, dan bridge di `src-tauri/src/android.rs`.
 
 `src/ipc.ts` membuat correlation ID per aksi UI; caller tidak perlu membuat ID
-sendiri. Metadata dan digest dibaca langsung dalam UID Shizuku UserService,
+sendiri. Metadata dan digest dibaca langsung dalam service privileged terpilih,
 tanpa shell/helper; mutasi tetap memakai guard dan jurnal yang sama. Panduan
 marker, bukti smoke lokal, dan batas verifikasi WM-23 ada di
 [`docs/android-traces.md`](docs/android-traces.md#implementasi-wm-23).

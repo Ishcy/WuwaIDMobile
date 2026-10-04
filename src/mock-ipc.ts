@@ -10,7 +10,7 @@ import {
   type Scenario,
 } from "./model";
 
-const STORAGE_KEY = "wuwaidmobile.mock-state.v3";
+const STORAGE_KEY = "wuwaidmobile.mock-state.v4";
 const GAME_VERSION = "3.7.0";
 const PACKAGE_NAME = "com.kurogame.wutheringwaves.global";
 
@@ -25,6 +25,7 @@ function seed(): Dashboard {
     game: { installed: true, version: GAME_VERSION, packageName: PACKAGE_NAME },
     resource: { ready: true, version: GAME_VERSION },
     shizuku: { running: true, granted: true },
+    access: { method: "shizuku", granted: true },
     patch: {
       installed: false,
       healthy: false,
@@ -42,6 +43,7 @@ function clone(dashboard: Dashboard): Dashboard {
     game: { ...dashboard.game },
     resource: { ...dashboard.resource },
     shizuku: { ...dashboard.shizuku },
+    access: { ...dashboard.access },
     patch: { ...dashboard.patch },
     uid: { ...dashboard.uid },
   };
@@ -67,6 +69,9 @@ function validDashboard(value: unknown): value is Dashboard {
     !!d.shizuku &&
     typeof d.shizuku.running === "boolean" &&
     typeof d.shizuku.granted === "boolean" &&
+    !!d.access &&
+    (d.access.method === "shizuku" || d.access.method === "root") &&
+    typeof d.access.granted === "boolean" &&
     !!d.patch &&
     typeof d.patch.installed === "boolean" &&
     typeof d.patch.healthy === "boolean" &&
@@ -116,8 +121,7 @@ function dependenciesReady(d: Dashboard): boolean {
   return (
     d.game.installed &&
     d.game.version === GAME_VERSION &&
-    d.shizuku.running &&
-    d.shizuku.granted &&
+    d.access.granted &&
     d.resource.ready &&
     d.resource.version === GAME_VERSION
   );
@@ -150,8 +154,17 @@ function scenarioState(scenario: Scenario): Dashboard {
     case "shizuku_off":
       next.shizuku.running = false;
       next.shizuku.granted = false;
+      next.access.granted = false;
       break;
     case "permission":
+      next.shizuku.granted = false;
+      next.access.granted = false;
+      break;
+    case "root_permission":
+    case "root_ready":
+      next.access.method = "root";
+      next.access.granted = scenario === "root_ready";
+      next.shizuku.running = false;
       next.shizuku.granted = false;
       break;
     case "recovery":
@@ -182,7 +195,10 @@ async function perform(
       { percent: 58, label: "Memproses…" },
       { percent: 100, label: "Simulasi selesai" },
     ];
-    if (operation === "request_permission") {
+    if (operation === "use_root" || operation === "use_shizuku" || operation === "request_root") {
+      if (operation === "request_root" && next.access.method !== "root")
+        throw new Error("Pilih metode Root terlebih dahulu.");
+    } else if (operation === "request_permission") {
       if (!next.shizuku.running) throw new Error("Shizuku belum aktif.");
     } else if (operation === "launch_game") {
       if (!next.game.installed)
@@ -269,6 +285,18 @@ async function perform(
         break;
       case "request_permission":
         next.shizuku.granted = true;
+        if (next.access.method === "shizuku") next.access.granted = true;
+        break;
+      case "use_root":
+        next.access.method = "root";
+        next.access.granted = false;
+        break;
+      case "use_shizuku":
+        next.access.method = "shizuku";
+        next.access.granted = next.shizuku.running && next.shizuku.granted;
+        break;
+      case "request_root":
+        next.access.granted = true;
         break;
       case "launch_game":
         break;

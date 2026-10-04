@@ -23,6 +23,7 @@
 -keep class com.titotfp.wuwaid.storage.StorageArgs { *; }
 -keep class com.titotfp.wuwaid.storage.ControlArgs { *; }
 -keep class com.titotfp.wuwaid.storage.StorageUserService { *; }
+-keep class com.titotfp.wuwaid.storage.RootStorageService { *; }
 -keep interface com.titotfp.wuwaid.storage.IStorageUserService { *; }
 -keep class com.titotfp.wuwaid.storage.IStorageUserService$* { *; }
 #-renamesourcefileattribute SourceFile

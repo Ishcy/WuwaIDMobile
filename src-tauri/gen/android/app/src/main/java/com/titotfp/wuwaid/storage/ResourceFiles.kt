@@ -12,7 +12,7 @@ import java.security.MessageDigest
 import org.json.JSONArray
 import org.json.JSONObject
 
-// Constructed only in the Shizuku UserService, never in the application process.
+// Constructed only in the privileged Shizuku or root service, never in the application process.
 internal class ResourceFiles(private val gameFiles: File) {
   private val buffer = ByteArray(64 * 1024)
   // UserService serializes calls. Reuse engines, never their previous results.
@@ -167,7 +167,7 @@ internal class ResourceFiles(private val gameFiles: File) {
       else -> throw IllegalArgumentException("Unsupported metadata operation")
     }
     return result.toByteArray(Charsets.UTF_8).also {
-      require(it.size <= LIMIT) { "Shizuku metadata response exceeded its limit" }
+      require(it.size <= LIMIT) { "Storage metadata response exceeded its limit" }
     }
   }
 

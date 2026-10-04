@@ -13,6 +13,10 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+        exclusiveContent {
+            forRepository { maven { url = uri("https://jitpack.io") } }
+            filter { includeGroup("com.github.topjohnwu.libsu") }
+        }
     }
 }
 

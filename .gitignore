@@ -43,3 +43,4 @@ __pycache__/
 *.pyc
 reverse_engineer/
 WATCHDOG.yml
+android_traces/

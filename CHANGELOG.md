@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Support direct root access through an explicit `su` permission request and a
+  non-daemon libsu 6.0.0 Binder service, without requiring Shizuku.
+  Reuse the guarded storage engine, PFD streaming, ownership, and transactions.
+- Add persistent Root/Shizuku selection in maintenance and selected-access
+  readiness across install, UID, repair, uninstall, and diagnostics.
+  Passive refresh never requests root; service loss fails without automatic
+  reconnect or transport fallback. Release pending binds on lifecycle teardown.
+- Verify 24 Rust tests including selected-access transitions and game/resource
+  gates, eight host-adapted root lifecycle cases, and root-only browser
+  Apply/Reset/removal/switching. Build the ARM64 debug APK and verify its
+  v2 signature and 16 KiB alignment. The user completed actual-device testing
+  and reported safe, correct operation; no quantitative device measurements
+  or exhaustive scenario/hash evidence were supplied.
+
 - Read root probes, directory listings, batched stat metadata, bounded text, and
   streaming hashes directly inside the privileged Shizuku UserService (API 24+).
   Remove their shell scripts, input pipes, and per-request threads; keep mutation

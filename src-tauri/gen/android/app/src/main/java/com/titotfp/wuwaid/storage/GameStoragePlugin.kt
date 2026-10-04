@@ -64,6 +64,9 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
   }
   private val serviceLock = Any()
   private val destroyed = AtomicBoolean(false)
+  private val rootSession = RootSession(activity)
+  private val accessPreferences = activity.getSharedPreferences("storage-access", Activity.MODE_PRIVATE)
+  private var accessMethod = accessPreferences.getString("method", "shizuku") ?: "shizuku"
   @Volatile private var userService: IStorageUserService? = null
   private var serviceBinding = false
   private var serviceReady: CountDownLatch? = null
@@ -152,6 +155,16 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
     when (args.action) {
       "request_permission" -> requestPermission(invoke, args.requestId)
       "launch_game" -> runOnUi(invoke) { launchPackage(GAME_PACKAGE) }
+      "request_root" -> dispatch(invoke) {
+        check(accessMethod == "root") { "Pilih metode Root terlebih dahulu." }
+        rootSession.request(args.requestId)
+        null
+      }
+      "use_root", "use_shizuku" -> dispatch(invoke) {
+        accessMethod = if (args.action == "use_root") "root" else "shizuku"
+        accessPreferences.edit().putString("method", accessMethod).apply()
+        null
+      }
       "open_shizuku" -> runOnUi(invoke) { launchPackage(SHIZUKU_PACKAGE) }
       "open_store" -> runOnUi(invoke) { openStore() }
       else -> invoke.reject("Unsupported app control action")
@@ -176,6 +189,7 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
     if (!destroyed.compareAndSet(false, true)) return
     pendingPermission.getAndSet(null)?.reject("Android storage plugin was destroyed")
     StorageTrace.mark(permissionRequestId, "permission.wait_user", "cancel")
+    rootSession.close()
     Shizuku.removeRequestPermissionResultListener(permissionListener)
     Shizuku.removeBinderDeadListener(binderDeadListener)
     val connection = synchronized(serviceLock) {
@@ -305,7 +319,8 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
     var rootReadable = false
     var rootWritable = false
     var storageError: String? = null
-    if (shizukuRunning && shizukuGranted) {
+    val accessGranted = if (accessMethod == "root") rootSession.granted() else shizukuGranted
+    if (accessGranted) {
       try {
         val status = JSONObject(metadata("probe_root").stdoutText())
         rootReadable = status.getBoolean("readable")
@@ -320,6 +335,8 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
       "gameVersion" to (gameVersion ?: ""),
       "shizukuRunning" to shizukuRunning,
       "shizukuGranted" to shizukuGranted,
+      "accessMethod" to accessMethod,
+      "accessGranted" to accessGranted,
       "rootReadable" to rootReadable,
       "rootWritable" to rootWritable,
       "storageError" to storageError
@@ -434,7 +451,7 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
       "hashes" -> "bridge.hashes"
       else -> "bridge.invalid"
     }) {
-      val service = StorageTrace.phase(requestId, "bind_service") { connectedUserService() }
+      val service = StorageTrace.phase(requestId, "bind_service") { connectedStorageService() }
       response(service.metadata(operation, first, second, requestId), MAX_METADATA_BYTES)
     }
 
@@ -492,6 +509,9 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
       throw IllegalStateException("Shizuku API 12 or newer is required; update Shizuku")
     }
   }
+  private fun connectedStorageService(): IStorageUserService =
+    if (accessMethod == "root") rootSession.connected() else connectedUserService()
+
 
   private fun connectedUserService(): IStorageUserService {
     requireShizuku()
@@ -575,7 +595,7 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
     stdoutLimit: Int = MAX_METADATA_BYTES
   ): ShellResult {
     if (arguments.size > 2) throw IllegalArgumentException("Too many storage command arguments")
-    val service = StorageTrace.phase(requestId, "bind_service") { connectedUserService() }
+    val service = StorageTrace.phase(requestId, "bind_service") { connectedStorageService() }
     val pipe = ParcelFileDescriptor.createPipe()
     val readEnd = pipe[0]
     val writeEnd = pipe[1]
@@ -604,18 +624,18 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
       task.get()
     } catch (error: ExecutionException) {
       throw IllegalStateException(
-        "Shizuku storage service call failed: ${error.cause?.message ?: error.message}",
+        "Storage service call failed: ${error.cause?.message ?: error.message}",
         error.cause ?: error
       )
     } catch (error: InterruptedException) {
       Thread.currentThread().interrupt()
-      throw IllegalStateException("Shizuku operation was interrupted", error)
+      throw IllegalStateException("Storage operation was interrupted", error)
     } finally {
       try { readEnd.close() } catch (_: Exception) {}
       try { writeEnd.close() } catch (_: Exception) {}
     }
 
-    inputFailure?.let { throw IllegalStateException("Unable to stream the app-cache source to Shizuku", it) }
+    inputFailure?.let { throw IllegalStateException("Unable to stream the app-cache source to the storage service", it) }
     if (expectedInputBytes != null && copiedInputBytes != expectedInputBytes) {
       throw IllegalStateException("App-cache source changed while it was being streamed")
     }
@@ -625,13 +645,13 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
   private fun response(response: android.os.Bundle, stdoutLimit: Int): ShellResult {
     val stdout = response.getByteArray(KEY_STDOUT) ?: byteArrayOf()
     val stderr = response.getByteArray(KEY_STDERR) ?: byteArrayOf()
-    if (stdout.size > stdoutLimit) throw IllegalStateException("Shizuku metadata response exceeded its limit")
-    if (stderr.size > MAX_ERROR_BYTES) throw IllegalStateException("Shizuku error output exceeded its limit")
+    if (stdout.size > stdoutLimit) throw IllegalStateException("Storage metadata response exceeded its limit")
+    if (stderr.size > MAX_ERROR_BYTES) throw IllegalStateException("Storage error output exceeded its limit")
     val exitCode = response.getInt(KEY_EXIT_CODE, 255)
     if (exitCode != 0) {
       val detail = String(stderr, StandardCharsets.UTF_8).trim().take(1024)
       throw IllegalStateException(
-        if (detail.isEmpty()) "Shizuku operation failed (exit $exitCode)" else "Shizuku operation failed: $detail"
+        if (detail.isEmpty()) "Storage operation failed (exit $exitCode)" else "Storage operation failed: $detail"
       )
     }
     return ShellResult(stdout, stderr)

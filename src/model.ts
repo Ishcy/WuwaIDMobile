@@ -7,6 +7,8 @@ export type Scenario =
   | "resource_missing"
   | "shizuku_off"
   | "permission"
+  | "root_permission"
+  | "root_ready"
   | "recovery";
 export type Operation =
   | "install"
@@ -15,7 +17,10 @@ export type Operation =
   | "apply_uid"
   | "restore_uid"
   | "launch_game"
-  | "request_permission";
+  | "request_permission"
+  | "request_root"
+  | "use_root"
+  | "use_shizuku";
 export interface ReleaseInfo {
   tag: string;
   gameVersion: string;
@@ -35,6 +40,7 @@ export interface Dashboard {
   game: { installed: boolean; version: string; packageName: string };
   resource: { ready: boolean; version: string };
   shizuku: { running: boolean; granted: boolean };
+  access: { method: "shizuku" | "root"; granted: boolean };
   patch: {
     installed: boolean;
     healthy: boolean;
@@ -79,8 +85,7 @@ export function installationPrerequisites(d: Dashboard): boolean {
     d.storageWritable &&
     d.game.installed &&
     compatibleGameVersion(d, d.game.version) &&
-    d.shizuku.running &&
-    d.shizuku.granted &&
+    d.access.granted &&
     d.resource.ready &&
     compatibleGameVersion(d, d.resource.version)
   );
@@ -96,7 +101,7 @@ export function readiness(d: Dashboard): {
       label: "Memerlukan Android",
       detail:
         d.blocker ??
-        "Pemasangan memerlukan Android dan Shizuku.",
+        "Pemasangan memerlukan Android dengan Shizuku atau root.",
     };
   if (!d.game.installed)
     return {
@@ -106,8 +111,7 @@ export function readiness(d: Dashboard): {
     };
   if (
     d.mode === "native" &&
-    d.shizuku.running &&
-    d.shizuku.granted &&
+    d.access.granted &&
     !d.release
   )
     return {
@@ -116,14 +120,20 @@ export function readiness(d: Dashboard): {
       detail:
         d.blocker ?? "Periksa koneksi, lalu muat ulang rilis.",
     };
-  if (!d.shizuku.running)
+  if (d.access.method === "root" && !d.access.granted)
+    return {
+      ready: false,
+      label: "Izin root diperlukan",
+      detail: "Berikan izin root melalui pengelola root, atau pilih Shizuku di Perawatan.",
+    };
+  if (d.access.method === "shizuku" && !d.shizuku.running)
     return {
       ready: false,
       label: "Shizuku belum aktif",
       detail:
         "Jalankan Shizuku untuk mengakses file game.",
     };
-  if (!d.shizuku.granted)
+  if (!d.access.granted)
     return {
       ready: false,
       label: "Izin diperlukan",
@@ -151,7 +161,7 @@ export function readiness(d: Dashboard): {
       ready: false,
       label: "Pemasangan diblokir",
       detail:
-        d.blocker ?? "Shizuku tidak dapat menulis direktori resource game.",
+        d.blocker ?? "Metode akses terpilih tidak dapat menulis direktori resource game.",
     };
   if (d.patch.recoveryPending || (d.patch.installed && !d.patch.healthy))
     return {
@@ -163,6 +173,6 @@ export function readiness(d: Dashboard): {
     ready: true,
     label: d.patch.installed ? "Terjemahan terpasang" : "Siap dipasang",
     detail:
-      "Game, Shizuku, dan resource siap.",
+      `Game, ${d.access.method === "root" ? "root" : "Shizuku"}, dan resource siap.`,
   };
 }

@@ -151,6 +151,8 @@ svg, .icon { flex-shrink: 0; }
 .health-icon .icon { width: 22px; height: 22px; }
 .health-banner > div { flex: 1; min-width: 0; }
 .health-banner .muted { margin-top: 7px; }
+.access-card { margin-bottom: 24px; }
+.access-card .actions { margin-top: 16px; }
 .tool-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-bottom: 24px; }
 .tool-row { display: flex; flex-direction: column; align-items: flex-start; padding: 22px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; gap: 18px; }
 .tool-icon { display: grid; place-items: center; width: 36px; height: 36px; background: var(--accent-soft); color: var(--accent-text); border-radius: 10px; }

@@ -57,6 +57,8 @@ pub struct DeviceProbe {
     pub game_version: String,
     pub shizuku_running: bool,
     pub shizuku_granted: bool,
+    pub access_method: String,
+    pub access_granted: bool,
     pub root_readable: bool,
     pub root_writable: bool,
     pub storage_error: Option<String>,

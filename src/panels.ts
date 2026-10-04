@@ -16,6 +16,8 @@ const scenarios: Array<{ id: Scenario; label: string }> = [
   { id: "resource_missing", label: "Resource belum siap" },
   { id: "shizuku_off", label: "Shizuku belum berjalan" },
   { id: "permission", label: "Perlu izin Shizuku" },
+  { id: "root_permission", label: "Root menunggu izin" },
+  { id: "root_ready", label: "Root siap tanpa Shizuku" },
   { id: "recovery", label: "Pemulihan diperlukan" },
 ];
 
@@ -31,7 +33,7 @@ function button(
 export function renderCustomize(state: UiState): string {
   const d = state.dashboard;
   if (!d.uidAvailable)
-    return `<section class="page-heading"><h1>Kustomisasi</h1></section><section class="card unavailable-studio"><h2>Memerlukan Android</h2><p class="muted">UID kustom memerlukan Android dan Shizuku.</p><button class="text-button" data-section="home">Beranda ${icon("arrow")}</button></section>`;
+    return `<section class="page-heading"><h1>Kustomisasi</h1></section><section class="card unavailable-studio"><h2>Memerlukan Android</h2><p class="muted">UID kustom memerlukan Android dengan Shizuku atau root.</p><button class="text-button" data-section="home">Beranda ${icon("arrow")}</button></section>`;
   const status = readiness(d);
   const canCustomize = !state.busy && status.ready;
   const draft = state.uidDraft.trim();
@@ -69,16 +71,14 @@ export function renderTools(state: UiState): string {
     d.platformSupported &&
     d.storageWritable &&
     d.game.installed &&
-    d.shizuku.running &&
-    d.shizuku.granted &&
+    d.access.granted &&
     d.resource.ready &&
     !d.patch.recoveryPending;
   const canRecover =
     d.platformSupported &&
     d.storageWritable &&
     d.game.installed &&
-    d.shizuku.running &&
-    d.shizuku.granted &&
+    d.access.granted &&
     d.resource.ready &&
     d.patch.recoveryPending;
   const canRepair =
@@ -87,17 +87,19 @@ export function renderTools(state: UiState): string {
     ? "game_missing"
     : !compatibleGameVersion(d, d.game.version)
       ? "unsupported"
-      : !d.shizuku.running
-        ? "shizuku_off"
-        : !d.shizuku.granted
-          ? "permission"
+      : d.access.method === "root" && !d.access.granted
+        ? "root_permission"
+        : d.access.method === "shizuku" && !d.shizuku.running
+          ? "shizuku_off"
+          : !d.access.granted
+            ? "permission"
           : !d.resource.ready
             ? "resource_missing"
             : d.patch.recoveryPending
               ? "recovery"
               : d.patch.installed
                 ? "installed"
-                : "ready";
+                : d.access.method === "root" ? "root_ready" : "ready";
   const scenarioOptions = scenarios
     .map(
       ({ id, label }) =>
@@ -148,11 +150,18 @@ export function renderTools(state: UiState): string {
     .join("");
   return `<section class="page-heading"><h1>Perawatan</h1></section>
     <section class="health-banner" aria-label="Status pemasangan"><span class="health-icon ${status.ready ? "healthy" : "needs-attention"}">${icon(status.ready ? "shield" : "info")}</span><div><h2>${escapeHtml(status.label)}</h2>${!status.ready ? `<p class="muted">${escapeHtml(status.detail)}</p>` : ""}</div></section>
+    ${d.platformSupported ? `<section class="card access-card" aria-labelledby="access-title">
+      <div class="card-header"><h2 id="access-title">Metode akses</h2>${icon("shield")}</div>
+      <p class="muted">${d.access.method === "root" ? "Root langsung melalui su. Shizuku tidak diperlukan." : "Shizuku untuk perangkat tanpa akses root."} Pergantian metode tidak mengubah file game.</p>
+      <div class="actions">${button("use_shizuku", "Gunakan Shizuku", state.busy || d.access.method === "shizuku")}${button("use_root", "Gunakan Root", state.busy || d.access.method === "root")}</div>
+      ${d.access.method === "root" ? `<p class="muted">Izin hanya diminta saat tombol berikut ditekan. Jika su tidak tersedia atau ditolak, pilih Shizuku.</p><div class="actions">${button("request_root", "Berikan izin root", state.busy || d.access.granted)}</div>` : ""}
+    </section>` : ""}
     <section class="tool-list" aria-label="Tindakan perawatan">${rows}</section>
     <div class="tools-detail-grid">
       <details class="card technical-details"><summary>Detail teknis</summary><dl class="info-list">
         <div class="info-row"><dt>Game</dt><dd>${d.game.installed ? "Terpasang" : "Belum terpasang"} · ${escapeHtml(d.game.version)}<code>${escapeHtml(d.game.packageName)}</code></dd></div>
         <div class="info-row"><dt>Shizuku</dt><dd>${d.shizuku.running ? "Aktif" : "Tidak aktif"} · ${d.shizuku.granted ? "Diizinkan" : "Belum diizinkan"}</dd></div>
+        <div class="info-row"><dt>Akses terpilih</dt><dd>${d.access.method === "root" ? "Root (su)" : "Shizuku"} · ${d.access.granted ? "Diizinkan" : "Belum diizinkan"}</dd></div>
         <div class="info-row"><dt>Resource</dt><dd>${d.resource.ready ? "Siap" : "Belum siap"} · ${escapeHtml(d.resource.version)}</dd></div>
         <div class="info-row"><dt>Terjemahan</dt><dd>${d.patch.installed ? "Terpasang" : "Belum terpasang"} · ${d.patch.healthy ? "Sehat" : "Perlu pemeriksaan"} · ${escapeHtml(d.patch.version)}${d.patch.recoveryPending ? " · Pemulihan tertunda" : ""}</dd></div>
         <div class="info-row"><dt>Rilis terbaru</dt><dd>${escapeHtml(d.mode === "mock" ? "3.7.0-R2 (contoh)" : (d.release?.tag ?? "Belum dimuat"))}</dd></div>

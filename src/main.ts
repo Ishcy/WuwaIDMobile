@@ -81,9 +81,11 @@ function renderHome() {
     primary = { action: "refresh", label: "Perlu Android" };
   else if (!d.game.installed)
     primary = { action: "setup-game", label: "Pasang game" };
-  else if (!d.shizuku.running)
+  else if (d.access.method === "root" && !d.access.granted)
+    primary = { action: "request_root", label: "Berikan izin root" };
+  else if (d.access.method === "shizuku" && !d.shizuku.running)
     primary = { action: "setup-shizuku", label: "Buka Shizuku" };
-  else if (!d.shizuku.granted)
+  else if (!d.access.granted)
     primary = { action: "request_permission", label: "Berikan izin Shizuku" };
   else if (d.mode === "native" && !d.release)
     primary = { action: "refresh", label: "Muat ulang rilis" };
@@ -115,15 +117,15 @@ function renderHome() {
       icon: "game",
     },
     {
-      name: "Shizuku",
+      name: d.access.method === "root" ? "Root" : "Shizuku",
       value: !d.platformSupported
         ? "Memerlukan Android"
-        : !d.shizuku.running
-          ? "Belum aktif"
-          : d.shizuku.granted
-            ? "Aktif · diizinkan"
-            : "Menunggu izin",
-      ok: d.shizuku.running && d.shizuku.granted,
+        : d.access.granted
+          ? "Aktif · diizinkan"
+          : d.access.method === "root"
+            ? "Menunggu izin root"
+            : d.shizuku.running ? "Menunggu izin" : "Belum aktif",
+      ok: d.access.granted,
       icon: "shield",
     },
     {
@@ -253,6 +255,9 @@ async function operate(operation: Operation, uidText?: string) {
         ? "Simulasi buka game selesai."
         : "Game dibuka.",
       request_permission: "Izin Shizuku diberikan.",
+      request_root: "Akses root aktif.",
+      use_root: "Metode Root dipilih. Berikan izin root untuk mengakses game.",
+      use_shizuku: "Metode Shizuku dipilih.",
     };
     notify(messages[operation]);
   });
@@ -324,7 +329,7 @@ app.addEventListener("click", async (event) => {
     }
   } else if (
     action &&
-    ["install", "repair", "launch_game", "request_permission"].includes(action)
+    ["install", "repair", "launch_game", "request_permission", "request_root", "use_root", "use_shizuku"].includes(action)
   )
     await operate(action as Operation);
 });

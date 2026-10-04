@@ -12,7 +12,9 @@ use tauri::{AppHandle, Manager};
 use crate::pak::model::{InstallStatus, PakResult, Release, ResourceLayout, GAME_PACKAGE};
 use crate::trace::{Request, Span};
 #[cfg(target_os = "android")]
-use crate::pak::{installer, model::DeviceProbe, release, uid};
+use crate::pak::{installer, release, uid};
+#[cfg(any(target_os = "android", test))]
+use crate::pak::model::DeviceProbe;
 
 #[derive(Default)]
 pub struct NativeState {
@@ -48,6 +50,7 @@ pub struct Dashboard {
     game: Game,
     resource: Resource,
     shizuku: Shizuku,
+    access: Access,
     patch: InstallStatus,
     uid: Uid,
     last_checked: u64,
@@ -67,6 +70,11 @@ struct Resource {
 #[derive(Serialize)]
 struct Shizuku {
     running: bool,
+    granted: bool,
+}
+#[derive(Serialize)]
+struct Access {
+    method: String,
     granted: bool,
 }
 #[derive(Serialize)]
@@ -118,19 +126,20 @@ fn fetch_release(app: &AppHandle) -> PakResult<Release> {
 fn bridge(app: &AppHandle) -> tauri::State<'_, crate::android::MobileBridge<tauri::Wry>> {
     app.state::<crate::android::MobileBridge<tauri::Wry>>()
 }
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", test))]
 fn physical_prerequisites(probe: &DeviceProbe) -> PakResult<()> {
     if !probe.game_installed {
         return Err("Wuthering Waves Global belum terpasang.".into());
     }
-    if !probe.shizuku_running {
-        return Err("Jalankan Shizuku terlebih dahulu.".into());
-    }
-    if !probe.shizuku_granted {
-        return Err("Berikan izin Shizuku terlebih dahulu.".into());
+    if !probe.access_granted {
+        return Err(if probe.access_method == "root" {
+            "Berikan izin root terlebih dahulu."
+        } else {
+            "Jalankan Shizuku dan berikan izin terlebih dahulu."
+        }.into());
     }
     if !probe.root_readable || !probe.root_writable {
-        return Err("Shizuku tidak dapat membaca/menulis resource game. Selesaikan unduhan resource di game.".into());
+        return Err("Metode akses terpilih tidak dapat membaca/menulis resource game. Periksa izin dan selesaikan unduhan resource di game.".into());
     }
     Ok(())
 }
@@ -187,13 +196,14 @@ fn load_dashboard(
         Ok(Dashboard {
             mode: "native", platform_supported: false, storage_writable: false,
             blocker: Some(match release_error {
-                Some(error) => format!("Pemasangan .pak memerlukan Android dan Shizuku. Rilis latest belum dapat dibaca: {error}"),
-                None => "Pemasangan .pak memerlukan Android dan Shizuku. Desktop tidak menulis direktori game.".into(),
+                Some(error) => format!("Pemasangan .pak memerlukan Android dengan Shizuku atau root. Rilis latest belum dapat dibaca: {error}"),
+                None => "Pemasangan .pak memerlukan Android dengan Shizuku atau root. Desktop tidak menulis direktori game.".into(),
             }),
             release: selected_release, uid_available: false,
             game: Game { installed: false, version: String::new(), package_name: GAME_PACKAGE },
             resource: Resource { ready: false, version: String::new() },
             shizuku: Shizuku { running: false, granted: false }, patch: empty_status(),
+            access: Access { method: "shizuku".into(), granted: false },
             uid: Uid { original: "", custom: None }, last_checked: timestamp(),
         })
     }
@@ -207,7 +217,7 @@ fn load_dashboard(
             version: String::new(),
         };
         let mut patch = empty_status();
-        if probe.shizuku_running && probe.shizuku_granted && probe.root_readable {
+        if probe.access_granted && probe.root_readable {
             // A successful transaction already returned a fully inspected terminal state.
             // This is scoped to this response; explicit refresh still discovers and hashes.
             let (layout, status) = match completed {
@@ -252,6 +262,7 @@ fn load_dashboard(
                 running: probe.shizuku_running,
                 granted: probe.shizuku_granted,
             },
+            access: Access { method: probe.access_method, granted: probe.access_granted },
             patch,
             uid: Uid {
                 original: "",
@@ -304,13 +315,13 @@ pub async fn wuwa_run(
         #[cfg(not(target_os = "android"))]
         {
             let _ = (&app, operation, uid_text);
-            Err("Pemasangan nyata memerlukan Android dan Shizuku.".into())
+            Err("Pemasangan nyata memerlukan Android dengan Shizuku atau root.".into())
         }
         #[cfg(target_os = "android")]
         {
             let storage = bridge(&app);
             let completed = match operation.as_str() {
-                "request_permission" | "launch_game" => {
+                "request_permission" | "request_root" | "use_root" | "use_shizuku" | "launch_game" => {
                     storage.control(&operation)?;
                     None
                 }
@@ -416,8 +427,66 @@ pub async fn wuwa_diagnostics(app: AppHandle, request_id: u64) -> PakResult<Diag
         let _phase = Span::new("diagnostics");
         let dashboard = load_dashboard(&app, false, None)?;
         let content = serde_json::to_string_pretty(&serde_json::json!({
-            "mock": false, "backend": if cfg!(target_os = "android") { "android-shizuku" } else { "desktop-unsupported" }, "dashboard": dashboard,
+            "mock": false, "backend": if cfg!(target_os = "android") { format!("android-{}", dashboard.access.method) } else { "desktop-unsupported".into() }, "dashboard": dashboard,
         })).map_err(|e| e.to_string())?;
         Ok(Diagnostics { filename: "wuwaidmobile-diagnostics.json", content })
     }).await.map_err(|e| e.to_string())?
+}
+
+#[cfg(test)]
+mod access_tests {
+    use super::physical_prerequisites;
+    use crate::pak::model::DeviceProbe;
+
+    fn root_probe() -> DeviceProbe {
+        DeviceProbe {
+            game_installed: true,
+            game_version: "3.7.0".into(),
+            shizuku_running: false,
+            shizuku_granted: false,
+            access_method: "root".into(),
+            access_granted: false,
+            root_readable: true,
+            root_writable: true,
+            storage_error: None,
+        }
+    }
+
+    #[test]
+    fn explicit_root_grant_unlocks_storage_without_shizuku() {
+        let mut probe = root_probe();
+        assert!(physical_prerequisites(&probe).is_err());
+        probe.access_granted = true;
+        assert!(physical_prerequisites(&probe).is_ok());
+        probe.access_granted = false;
+        assert!(physical_prerequisites(&probe).is_err());
+    }
+
+    #[test]
+    fn other_transport_permission_cannot_unlock_selected_method() {
+        let mut probe = root_probe();
+        probe.shizuku_running = true;
+        probe.shizuku_granted = true;
+        assert!(physical_prerequisites(&probe).is_err());
+        probe.access_method = "shizuku".into();
+        assert!(physical_prerequisites(&probe).is_err());
+        probe.access_granted = true;
+        assert!(physical_prerequisites(&probe).is_ok());
+    }
+
+    #[test]
+    fn root_does_not_bypass_game_and_resource_permissions() {
+        let mut probe = root_probe();
+        probe.access_granted = true;
+        probe.game_installed = false;
+        assert!(physical_prerequisites(&probe).is_err());
+        probe.game_installed = true;
+        probe.root_readable = false;
+        assert!(physical_prerequisites(&probe).is_err());
+        probe.root_readable = true;
+        probe.root_writable = false;
+        assert!(physical_prerequisites(&probe).is_err());
+        probe.root_writable = true;
+        assert!(physical_prerequisites(&probe).is_ok());
+    }
 }

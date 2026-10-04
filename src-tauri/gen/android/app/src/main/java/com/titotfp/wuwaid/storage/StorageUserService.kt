@@ -126,10 +126,10 @@ class StorageUserService : IStorageUserService.Stub() {
       val stdoutBytes = stdout.bytes()
       val stderrBytes = stderr.bytes()
       if (stdoutBytes.size > MAX_METADATA_BYTES) {
-        return failure("Shizuku metadata response exceeded its limit")
+        return failure("Storage metadata response exceeded its limit")
       }
       if (stderrBytes.size > MAX_ERROR_BYTES) {
-        return failure("Shizuku error output exceeded its limit")
+        return failure("Storage error output exceeded its limit")
       }
       Bundle().apply {
         putInt(KEY_EXIT_CODE, exitCode)
@@ -143,9 +143,13 @@ class StorageUserService : IStorageUserService.Stub() {
       try { inputFd.close() } catch (_: Exception) {}
     }
   }
-
-  override fun destroy() {
+  internal fun close() {
     outputExecutor.shutdownNow()
+  }
+
+  // The root adapter closes workers through its own lifecycle, without the Shizuku exit command.
+  override fun destroy() {
+    close()
     System.exit(0)
   }
 
@@ -231,7 +235,7 @@ class StorageUserService : IStorageUserService.Stub() {
     }
 
     fun bytes(): ByteArray {
-      failure?.let { throw IllegalStateException("Unable to read Shizuku process output", it) }
+      failure?.let { throw IllegalStateException("Unable to read storage process output", it) }
       return output.toByteArray()
     }
   }
