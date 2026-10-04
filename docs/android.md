@@ -195,8 +195,9 @@ npm test
   :app:testUniversalDebugUnitTest --no-configuration-cache --console=plain
 ```
 
-`npm test` memeriksa tipe source/tes lalu menjalankan **10 tes Vitest/jsdom**.
-Task Gradle menjalankan **27 tes Kotlin/Robolectric**: 18 repository dan 9 plugin.
+Suite updater WM-26 sendiri berisi **10 tes Vitest/jsdom** dan **27 tes
+Kotlin/Robolectric** (18 repository dan 9 plugin). Perintah di atas otomatis
+menjalankan pula tes lintas fitur WM-27; jumlah suite saat ini dicatat di bawah.
 Fixture resource-only APK memakai binary manifest `aapt2`, pustaka ARM64 yang
 dikompilasi NDK dan signing key sementara, bukan keystore rilis. MockWebServer
 melayani byte APK dan metadata melalui TLS lokal; factory koneksi internal hanya
@@ -271,6 +272,108 @@ batas ini; tidak dilakukan reformat berkas yang tidak terkait updater.
   Pengguna kemudian melaporkan **“sudah kuuji aman”** dan meminta pre-commit review
   serta commit. Ini dicatat sebagai penerimaan pengguna, bukan bukti bahwa semua
   skenario checklist di atas telah dijalankan; rincian cakupan tidak dilaporkan.
+
+## Regresi lintas fitur (WM-27)
+
+WM-27 menambahkan 47 tes host dan 6 tes instrumentasi di luar cakupan updater.
+Tidak ada perubahan perilaku produksi. Hasil host saat ini:
+
+| Suite | Jumlah lulus | Cakupan baru |
+| --- | ---: | --- |
+| Frontend, `npm test` | 41 (31 baru) | Versi/prasyarat, isolasi root/Shizuku, draft UTF-16, UID pertama/Reset/busy/escaping, Perawatan offline/legacy/recovery |
+| Rust, `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` | 33 (9 baru) | Cache PAK melalui API publik, metadata/URL invalid sebelum mutasi, partial/publikasi, symlink/collision/hash segar, rollback empat tahap dan UID invalid |
+| Kotlin, `:app:testUniversalDebugUnitTest` | 34 (7 baru) | Allowlist mutasi berkas/direktori/versi/lifecycle legacy dan validasi package game, tanpa shell atau akses istimewa |
+
+Suite Kotlin dieksekusi ulang, dengan 0 skip/failure/error. Seluruh suite Rust
+dan frontend serta build frontend lulus. Smoke Chromium pada UI nyata mencakup
+11 skenario, transisi izin root simulasi saat Shizuku mati, penerapan UID pertama,
+busy, persistensi setelah reload, Reset, draft yang bertahan saat tema berubah,
+dialog penghapusan batal/konfirmasi dan lebar 320/412/1024 tanpa overflow
+horizontal; tidak ada error runtime yang tercatat. Backend browser adalah mock,
+bukan bukti akses root atau perubahan PAK Android.
+
+Smoke CLI memakai engine Rust dan adapter filesystem lokal dengan cache
+terverifikasi, tanpa jaringan: install/repair/uninstall sehat, berkas resmi dan
+tak dimiliki aplikasi tetap utuh, sumber unduhan tetap utuh. Program smoke
+sementara sudah dihapus. Warning Rust/API legacy dan deprecation Java/AGP tetap
+ada; format baseline di luar cakupan tidak direformat. Workflow GitHub tidak
+dijalankan dalam pengerjaan ini.
+
+Pre-commit review menghapus assertion `mtime` dari tes reuse cache: tes tetap
+memverifikasi jalur API publik, path cache dan byte terverifikasi, bukan metadata
+filesystem yang tidak termasuk kontrak. Pengguna kemudian mengizinkan commit;
+tidak ada push atau pengujian perangkat oleh asisten.
+
+Verifikasi ulang setelah review: 41 tes frontend, 33 Rust dan 34 host Android
+lulus; build frontend dan kompilasi instrumentasi berhasil. Smoke CLI tambahan
+pada API `download` menghasilkan cache hit, byte yang tepat, serta penolakan
+metadata tidak valid tanpa mengubah cache. Program sementara dihapus setelah
+smoke. Ketiga checksum APK di atas tetap sama; 8 tes perangkat belum dijalankan.
+
+### Menyiapkan tes perangkat
+
+`ResourceFilesTest` kini berisi **8 tes instrumentasi**: batas teks 256 KiB dan
+file kosong, penutupan FD pada jalur sukses/gagal, digest segar setelah mutasi
+ukuran sama/pergantian mode/deletion, batch 64 vs 65 dengan urutan hasil, path
+invalid, symlink, FIFO dan direktori non-file. Fixture dibuat di cache privat
+aplikasi debug, bukan direktori game. Delapan tes ini **belum dieksekusi**;
+kompilasi dan packaging saja yang diverifikasi.
+
+Dari root repository, dengan SDK/NDK/JDK yang sama seperti build aplikasi:
+
+```sh
+npm run tauri android build -- --debug --apk --target aarch64
+./src-tauri/gen/android/gradlew -p src-tauri/gen/android \
+  :app:testUniversalDebugUnitTest --rerun \
+  :app:compileUniversalDebugAndroidTestKotlin \
+  --no-configuration-cache --console=plain
+./src-tauri/gen/android/gradlew -p src-tauri/gen/android \
+  :app:assembleUniversalDebugAndroidTest \
+  -PabiList=arm64-v8a -ParchList=arm64 -PtargetList=aarch64 \
+  -x :app:rustBuildArm64Debug --no-configuration-cache --console=plain
+```
+
+Build Tauri pertama wajib berhasil pada source yang sama sebelum perintah
+packaging terakhir. Task Rust dikecualikan **hanya untuk memakai library ARM64
+yang baru dibangun**, bukan mengganti implementasi native: driver Gradle Rust
+memerlukan server opsi CLI Tauri aktif dan default universal mencoba empat ABI.
+Ketiga properti target membatasi packaging ke ARM64. Jangan memakai pengecualian
+ini setelah mengubah source native tanpa membangun ulang lewat CLI Tauri.
+
+Artefak yang sudah dibuat:
+
+```text
+src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
+SHA-256: bedf4b60404f6ceedead0c158abd9a8b5bbfa6dec9638ce589eebde4bd9e75bc
+
+src-tauri/gen/android/app/build/outputs/apk/androidTest/universal/debug/app-universal-debug-androidTest.apk
+SHA-256: 91f834aee9ffa6b258b5ad24e1b9e54bdedcde6ab10dc3d4b79dd3a46a430329
+```
+
+Manifest APK tes dikonfirmasi memakai package `com.titotfp.wuwaid.debug.test`,
+runner `androidx.test.runner.AndroidJUnitRunner`, target
+`com.titotfp.wuwaid.debug`, minSdk 24 dan targetSdk 36. Package debug/test terpisah
+dari release `com.titotfp.wuwaid`; APK release WM-26 masih memiliki checksum
+`f5a089582f140d0eef19c5ab4c4a6a692f2351b2fa74a579441d424eefa85565`.
+APK ini bukan kandidat upgrade release dan tidak menggantikan penerimaannya.
+
+**Hanya dijalankan pengguna pada perangkat ARM64**:
+
+```sh
+adb install -r src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
+adb install -r src-tauri/gen/android/app/build/outputs/apk/androidTest/universal/debug/app-universal-debug-androidTest.apk
+adb shell am instrument -w \
+  -e class com.titotfp.wuwaid.storage.ResourceFilesTest \
+  com.titotfp.wuwaid.debug.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+Catat versi Android dan hasil delapan tes, termasuk kegagalan atau skip.
+Instrumentasi ini tidak membuktikan Binder, izin/kematian service root/Shizuku,
+akses scoped storage game atau interpretasi mount oleh game. QA pengguna tetap
+mencakup kedua package game yang tersedia, kedua metode akses, izin ditolak lalu
+diberikan, service terputus, install/UID/repair/uninstall, pemulihan transaksi dan
+migrasi legacy yang valid, serta game setelah pemasangan. Jangan menyatakan
+performa membaik atau semua skenario perangkat lulus dari tes host/build saja.
 
 ## Referensi
 

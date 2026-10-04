@@ -604,4 +604,135 @@ mod tests {
         assert!(!verify_file(&path, bytes.len() as u64 + 1, &digest).unwrap());
         assert!(!verify_file(&path, bytes.len() as u64, &"0".repeat(64)).unwrap());
     }
+
+    fn release_fixture(bytes: &[u8]) -> super::Release {
+        super::Release {
+            tag: "v3.7.1-id.1".into(),
+            game_version: "3.7.1".into(),
+            asset_name: "translation.pak".into(),
+            download_url: "https://github.com/TitoTFP/WuwaID/releases/download/v3.7.1-id.1/translation.pak".into(),
+            html_url: "https://github.com/TitoTFP/WuwaID/releases/tag/v3.7.1-id.1".into(),
+            size: bytes.len() as u64,
+            sha256: sha256(bytes),
+        }
+    }
+
+    #[test]
+    fn public_download_reuses_verified_cache_without_network() {
+        let root = tempfile::tempdir().unwrap();
+        let bytes = b"verified offline translation";
+        let mut release = release_fixture(bytes);
+        release.sha256 = format!("sha256:{}", release.sha256.to_ascii_uppercase());
+        let cache = root.path().join(format!("{}-{}", release.tag, release.asset_name));
+        fs::write(&cache, bytes).unwrap();
+        let path = super::download(&release, root.path(), &|_| {}).unwrap();
+        assert_eq!(path, cache);
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+    }
+
+    #[test]
+    fn invalid_release_metadata_is_rejected_before_creating_or_mutating_cache() {
+        let root = tempfile::tempdir().unwrap();
+        let untouched = root.path().join("unrelated");
+        fs::write(&untouched, b"keep").unwrap();
+        let valid = release_fixture(b"payload");
+        let mut invalid = Vec::new();
+        for url in [
+            "http://github.com/TitoTFP/WuwaID/releases/download/v3.7.1-id.1/translation.pak",
+            "https://evil.example/translation.pak",
+            "https://github.com/TitoTFP/WuwaIDMobile/releases/download/v3.7.1-id.1/translation.pak",
+            "https://github.com/TitoTFP/WuwaID/releases/download/v3.7.2-id.1/translation.pak",
+            "https://user@github.com/TitoTFP/WuwaID/releases/download/v3.7.1-id.1/translation.pak",
+            "https://github.com:444/TitoTFP/WuwaID/releases/download/v3.7.1-id.1/translation.pak",
+            "https://github.com/TitoTFP/WuwaID/releases/download/v3.7.1-id.1/translation.pak?token=x",
+            "https://github.com/TitoTFP/WuwaID/releases/download/v3.7.1-id.1/translation.pak#fragment",
+        ] {
+            let mut release = valid.clone();
+            release.download_url = url.into();
+            invalid.push(release);
+        }
+        for name in ["../translation.pak", "other\\translation.pak", "translation.apk", "bad\n.pak"] {
+            let mut release = valid.clone();
+            release.asset_name = name.into();
+            invalid.push(release);
+        }
+        let mut wrong_version = valid.clone();
+        wrong_version.game_version = "3.8.0".into();
+        invalid.push(wrong_version);
+        let mut empty = valid.clone();
+        empty.size = 0;
+        invalid.push(empty);
+        let mut bad_hash = valid.clone();
+        bad_hash.sha256 = "g".repeat(64);
+        invalid.push(bad_hash);
+        let mut wrong_page = valid;
+        wrong_page.html_url = "https://github.com/TitoTFP/WuwaID/releases/tag/v3.7.2-id.1".into();
+        invalid.push(wrong_page);
+        let cache = root.path().join("not-yet-created");
+        for release in invalid {
+            assert!(super::download(&release, &cache, &|_| {}).is_err(), "{release:?}");
+            assert!(!cache.exists());
+            assert_eq!(fs::read(&untouched).unwrap(), b"keep");
+        }
+    }
+
+    #[test]
+    fn abandoned_or_failed_publication_removes_only_its_own_partial() {
+        use std::io::Write;
+        let root = tempfile::tempdir().unwrap();
+        let cache = root.path().join("translation.pak");
+        fs::write(&cache, b"previous cache").unwrap();
+        let partial;
+        {
+            let mut stage = super::StagedFile::create(root.path(), &cache).unwrap();
+            partial = stage.path.clone();
+            stage.file_mut().write_all(b"unfinished").unwrap();
+        }
+        assert!(!partial.exists());
+        assert_eq!(fs::read(&cache).unwrap(), b"previous cache");
+        let directory = root.path().join("directory-collision");
+        fs::create_dir(&directory).unwrap();
+        fs::write(directory.join("keep"), b"unrelated").unwrap();
+        let failed;
+        {
+            let mut stage = super::StagedFile::create(root.path(), &cache).unwrap();
+            failed = stage.path.clone();
+            stage.file_mut().write_all(b"cannot publish").unwrap();
+            assert!(stage.publish(&directory).is_err());
+        }
+        assert!(!failed.exists());
+        assert_eq!(fs::read(directory.join("keep")).unwrap(), b"unrelated");
+        assert_eq!(fs::read(&cache).unwrap(), b"previous cache");
+    }
+
+    #[test]
+    fn successful_stage_publication_replaces_cache_with_exact_new_bytes() {
+        use std::io::Write;
+        let root = tempfile::tempdir().unwrap();
+        let cache = root.path().join("translation.pak");
+        fs::write(&cache, b"old").unwrap();
+        let partial;
+        {
+            let mut stage = super::StagedFile::create(root.path(), &cache).unwrap();
+            partial = stage.path.clone();
+            stage.file_mut().write_all(b"verified replacement").unwrap();
+            stage.file_mut().sync_all().unwrap();
+            stage.publish(&cache).unwrap();
+        }
+        assert!(!partial.exists());
+        assert_eq!(fs::read(&cache).unwrap(), b"verified replacement");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cache_verification_rejects_symlinks_even_when_target_digest_matches() {
+        use std::os::unix::fs::symlink;
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("outside-cache");
+        fs::write(&source, b"valid bytes").unwrap();
+        let link = root.path().join("cache.pak");
+        symlink(&source, &link).unwrap();
+        assert!(!super::cache_is_valid(&link, 11, &sha256(b"valid bytes")).unwrap());
+        assert_eq!(fs::read(&source).unwrap(), b"valid bytes");
+    }
 }

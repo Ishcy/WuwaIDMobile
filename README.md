@@ -146,6 +146,30 @@ Solaris-3** tampil dalam Bahasa Indonesia tanpa dialog error pada layar tersebut
 Pengujian gameplay untuk UID kustom dijelaskan di bawah; belum memeriksa seluruh
 konten terjemahan.
 
+### Pengujian lintas fitur (WM-27)
+
+Suite saat ini mencakup **108 tes host yang lulus**: 41 frontend, 33 Rust, dan
+34 Kotlin. WM-27 menambahkan **47 tes host** di luar cakupan updater sebelumnya:
+aturan kesiapan/akses, UID dan Perawatan, metadata/cache PAK, cleanup staging,
+collision filesystem, rollback pemasangan pertama pada empat tahap commit,
+serta batas mutasi/pemilihan package storage Android.
+
+Smoke Chromium menjalankan 11 skenario Perawatan, izin root simulasi tanpa
+Shizuku, UID pertama/busy/persistensi/Reset, pergantian tema, pembatalan dan
+konfirmasi penghapusan, serta lebar 320/412/1024 tanpa overflow horizontal.
+Smoke CLI menjalankan engine PAK sebenarnya pada fixture lokal: cache
+terverifikasi, install, repair dan uninstall sambil mempertahankan berkas
+resmi, berkas tak dimiliki aplikasi, dan sumber unduhan. Ini bukan bukti game.
+
+**8 tes instrumentasi Android** (6 baru) sudah dikompilasi dan APK tes dibuat,
+tetapi **belum dijalankan pada perangkat**. APK debug dan APK instrumentasi
+memakai package berbeda dari release; kandidat release WM-26 tidak diganti.
+[Perintah, APK/checksum dan checklist perangkat](docs/android.md#regresi-lintas-fitur-wm-27)
+dicatat terpisah. Implementasi WM-27 semula diselesaikan tanpa commit atau push;
+pengguna kemudian mengizinkan pre-commit review dan commit. Review menghapus
+assertion `mtime` yang tidak termasuk kontrak cache. Tidak ada perubahan perilaku
+produksi, push atau tes perangkat oleh asisten.
+
 ### Pembaruan aplikasi Android (WM-26)
 
 Updater **aplikasi** memakai rilis stabil

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Expand current-state regression coverage (WM-27) with 31 frontend, 9 Rust and
+  7 Android host tests for access/readiness, UID and maintenance gates, verified
+  PAK cache reuse, unsafe metadata, staging cleanup, collisions, fresh hashes,
+  first-install rollback and privileged storage boundaries. All 108 host tests
+  pass, alongside real browser UI and local PAK-engine CLI smoke. Prepare six
+  additional Android instrumentation cases (eight total), compile and package
+  their APK against the current ARM64 debug build, and document user-only device
+  execution. Device tests are not reported as passed; production behavior and the
+  accepted release APK remain unchanged.
+  Keep cache regression assertions focused on verified paths and bytes rather
+  than filesystem modification timestamps.
+
 - Add the Android application updater (WM-26), separate from translation PAK
   releases: check stable WuwaIDMobile releases on startup or manually, show an
   in-app update banner, stream and verify APK downloads with progress, then open

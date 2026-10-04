@@ -369,4 +369,41 @@ mod tests {
         assert!(storage.stat("3.7.0/wuwaid/patch.pak").is_err());
         assert!(storage.mkdir("3.7.0/wuwaid").is_err());
     }
+
+    #[test]
+    fn existing_targets_are_never_replaced_by_write_copy_or_move() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("3.7.0/wuwaid")).unwrap();
+        let storage = LocalStorage::new(root.path()).unwrap();
+        let source = "3.7.0/wuwaid/WuwaID_99_P.pak.new";
+        let target = "3.7.0/wuwaid/WuwaID_99_P.pak";
+        fs::write(root.path().join(source), b"new payload").unwrap();
+        fs::write(root.path().join(target), b"unowned collision").unwrap();
+        assert!(storage.write_text(target, "replacement").is_err());
+        assert!(storage.copy(source, target).is_err());
+        assert!(storage.move_file(source, target).is_err());
+        assert!(storage.write_from_file(target, &root.path().join(source)).is_err());
+        assert_eq!(fs::read(root.path().join(target)).unwrap(), b"unowned collision");
+        assert_eq!(fs::read(root.path().join(source)).unwrap(), b"new payload");
+    }
+
+    #[test]
+    fn fresh_hashes_detect_same_size_changes_and_do_not_reuse_previous_sha1() {
+        use sha1::Sha1;
+        use sha2::{Digest, Sha256};
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("payload");
+        fs::write(&path, b"first").unwrap();
+        let storage = LocalStorage::new(root.path()).unwrap();
+        let first = storage.hashes("payload", true).unwrap();
+        fs::write(&path, b"other").unwrap();
+        let changed = storage.hashes("payload", false).unwrap();
+        assert_eq!(changed.size, 5);
+        assert_eq!(changed.sha256, hex::encode(Sha256::digest(b"other")));
+        assert_eq!(changed.sha1, None);
+        assert_ne!(changed.sha256, first.sha256);
+        let both = storage.hashes("payload", true).unwrap();
+        assert_eq!(both.sha256, changed.sha256);
+        assert_eq!(both.sha1, Some(hex::encode(Sha1::digest(b"other"))));
+    }
 }

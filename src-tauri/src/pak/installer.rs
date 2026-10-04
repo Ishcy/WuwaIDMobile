@@ -2488,4 +2488,51 @@ mod tests {
             assert_eq!(fs::read(root.path().join(path)).unwrap(), bytes);
         }
     }
+
+    #[test]
+    fn first_install_commit_failures_leave_no_owned_artifacts_and_preserve_unowned_files() {
+        for slot in SLOTS {
+            let (root, storage, pak, layout) = setup_fixture();
+            let storage = Arc::new(storage);
+            let patch = root.path().join(format!("{}/{PATCH_DIRECTORY}", layout.version));
+            fs::create_dir(&patch).unwrap();
+            fs::write(patch.join("user-note"), b"do not remove").unwrap();
+            let signature = fs::read(root.path().join(&layout.signature)).unwrap();
+            let release = release(&pak, "v3.7.1-id.1");
+            let failing = FailMoveStorage {
+                inner: Arc::clone(&storage),
+                fail_target: target_path(&layout.version, slot),
+                failures_remaining: Arc::new(Mutex::new(1)),
+            };
+            assert!(install(&failing, &layout, &release, &pak, None, &no_progress).is_err());
+            let after = inspect(storage.as_ref(), &layout).unwrap();
+            assert!(!after.installed && !after.recovery_pending);
+            for path in target_paths(&layout.version) {
+                for suffix in ["", ".new", ".bak"] {
+                    assert!(!root.path().join(format!("{path}{suffix}")).exists(), "{path}{suffix}");
+                }
+            }
+            assert!(!patch.join(".transaction.json").exists());
+            assert_eq!(fs::read(patch.join("user-note")).unwrap(), b"do not remove");
+            assert_eq!(fs::read(root.path().join(&layout.signature)).unwrap(), signature);
+            let retried = install(storage.as_ref(), &layout, &release, &pak, None, &no_progress).unwrap();
+            assert!(retried.installed && retried.healthy && !retried.recovery_pending);
+            assert_mount_resolves(root.path(), storage.as_ref(), &layout, &pak);
+        }
+    }
+
+    #[test]
+    fn invalid_uid_on_first_install_leaves_source_and_resource_tree_untouched() {
+        for text in ["", " \t ", "bad\nUID", "bad\u{2028}UID", &"x".repeat(33)] {
+            let (root, storage, pak, layout) = setup_fixture();
+            uid::tests::write_valid_fixture(&pak);
+            let source = fs::read(&pak).unwrap();
+            let release = release(&pak, "v3.7.1-id.1");
+            assert!(install(&storage, &layout, &release, &pak, Some(text), &no_progress).is_err());
+            assert!(!root.path().join(format!("{}/{PATCH_DIRECTORY}", layout.version)).exists());
+            assert!(!root.path().join(target_path(&layout.version, Slot::Mount)).exists());
+            assert_eq!(fs::read(&pak).unwrap(), source);
+            assert_eq!(fs::read(root.path().join(&layout.signature)).unwrap(), b"official signature bytes");
+        }
+    }
 }
