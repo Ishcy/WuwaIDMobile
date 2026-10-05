@@ -1,10 +1,10 @@
 import { mockIPC } from "@tauri-apps/api/mocks";
+import { mockDiagnostics } from "./diagnostics";
 import {
   CONTENT_VERSION,
   UID_MAX_LENGTH,
   readiness,
   type Dashboard,
-  type Diagnostics,
   type Operation,
   type Progress,
   type Scenario,
@@ -320,16 +320,6 @@ async function perform(
   }
 }
 
-function diagnosticsSnapshot(): Diagnostics {
-  return {
-    filename: "wuwaidmobile-diagnostics.json",
-    content: JSON.stringify(
-      { mock: true, backend: "Tauri mockIPC; no real game access", dashboard },
-      null,
-      2,
-    ),
-  };
-}
 
 mockIPC(async (command, args) => {
   const payload = (args ?? {}) as Record<string, unknown>;
@@ -354,7 +344,7 @@ mockIPC(async (command, args) => {
         payload.uidText as string | undefined,
       );
     case "wuwa_diagnostics":
-      return diagnosticsSnapshot();
+      return mockDiagnostics(dashboard);
     default:
       throw new Error(`Perintah mock tidak dikenal: ${command}`);
   }

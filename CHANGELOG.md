@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Mature diagnostics and Android export (WM-28): add a versioned, redacted JSON
+  report with application/device metadata, independent partial-failure sections
+  and explicit not-checked states. Keep the latest 20 session errors with bounded,
+  idempotently redacted messages. Replace blob-only Android export with native
+  document saving and read-only JSON sharing; distinguish saved/cancelled/failed
+  and chooser-opened outcomes without claiming recipient delivery. Fix redaction
+  of valid UIDs beginning with `[REDACTED]` while preserving existing markers.
+  Verify 131 host tests, Chromium export smoke and the ARM64 debug APK build.
+  Record the user's successful physical-device test on the pre-review APK;
+  the reviewed APK is locally verified without repeating device tests. Release
+  APK and signing material are unchanged.
+
 - Expand current-state regression coverage (WM-27) with 31 frontend, 9 Rust and
   7 Android host tests for access/readiness, UID and maintenance gates, verified
   PAK cache reuse, unsafe metadata, staging cleanup, collisions, fresh hashes,

@@ -61,6 +61,31 @@ export interface Diagnostics {
   filename: string;
   content: string;
 }
+export type DiagnosticCheckStatus = "ok" | "error" | "not_checked";
+export interface DiagnosticSection {
+  status: DiagnosticCheckStatus;
+  data: Record<string, unknown> | null;
+  error: string | null;
+  reason: string | null;
+}
+export interface DiagnosticError {
+  timestamp: number;
+  operation: string;
+  message: string;
+}
+export interface DiagnosticReport {
+  schemaVersion: 1;
+  generatedAt: number;
+  mock: boolean;
+  backend: string;
+  sections: Record<"application" | "device" | "probe" | "resource" | "patch" | "release", DiagnosticSection>;
+  privacy: { customUid: "redacted"; errorHistory: "session"; maximumErrors: 20 };
+  errors: DiagnosticError[];
+}
+export interface DiagnosticExportResult {
+  status: "saved" | "cancelled" | "failed" | "share_opened" | "download_started";
+  message?: string;
+}
 export interface AppUpdateStatus {
   supported: boolean;
   currentVersion: string | null;

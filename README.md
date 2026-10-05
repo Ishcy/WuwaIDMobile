@@ -15,7 +15,7 @@ referensi. Tiga layar:
 - **Kustomisasi:** UID kustom native di Android dan simulasi di browser, dengan
   penerapan dan Reset tanpa pratinjau. Hanya teks tampilan yang berubah, bukan UID akun.
 - **Perawatan:** pilihan Shizuku/root, pemeriksaan ulang, pemulihan transaksi,
-  ekspor diagnostik JSON, dan penghapusan berkas milik aplikasi dengan konfirmasi.
+  penyimpanan/berbagi diagnostik JSON teredaksi, dan penghapusan berkas milik aplikasi dengan konfirmasi.
 - Navigasi horizontal di desktop dan dock bawah pada layar Android.
 - **Terang / Gelap / Sistem** tersedia di header. Default mengikuti tema sistem;
   pilihan disimpan lokal dengan key `wuwaidmobile.theme` dan diterapkan sebelum
@@ -631,6 +631,45 @@ State browser disimpan dengan key `wuwaidmobile.mock-state.v5`; skenario mereset
 data contoh dan custom UID. Ekspor diagnostik membedakan `mock: true` dan
 `mock: false`, serta backend Android atau desktop yang tidak didukung.
 
+### Diagnostik dan ekspor (WM-28)
+
+**Perawatan → Simpan diagnostik / Bagikan diagnostik** menghasilkan laporan
+`schemaVersion: 1`. Bagian `application`, `device`, `probe`, `resource`, `patch`
+dan `release` memakai status `ok`, `error`, atau `not_checked`, beserta `data`,
+`error` dan `reason`. Bagian gagal/belum diperiksa memiliki `data: null`;
+ini tidak berarti terjemahan tidak terpasang. Kegagalan probe, metadata,
+discovery atau inspeksi tidak membuang bagian lain yang masih tersedia.
+
+Android mencatat identitas/versi aplikasi, versionCode/build type, Android SDK,
+versi OS, manufacturer/model dan ABI. Pemeriksaan resource/PAK dibaca ulang
+jika akses tersedia; rilis PAK memakai cache sesi tanpa meminta jaringan.
+Teks UID kustom tidak dimasukkan; laporan hanya mencatat `uidCustomized`
+ketika pemasangan berhasil diperiksa. Pesan error juga meredaksi UID kustom
+aktif dan input UID operasi yang diketahui. History menyimpan maksimal
+20 kegagalan IPC/ekspor terbaru dalam sesi frontend. Pesan history disimpan
+maksimal 1024 unit UTF-16 setelah redaksi; penanda redaksi saat serialisasi
+dapat sedikit memperpanjang pesan ekspor. History hilang ketika frontend dimuat ulang.
+
+**Simpan** di Android membuka pemilih dokumen sistem. Status `saved` hanya
+diberikan setelah penulisan, flush dan penutupan stream berhasil; pembatalan
+dan kegagalan berbeda. **Bagikan** membuka chooser dengan URI read-only untuk
+snapshot JSON unik di cache privat. `share_opened` tidak membuktikan pengiriman
+ke aplikasi penerima. Cache laporan milik fitur yang berumur lebih dari
+24 jam dibersihkan pada aksi berbagi berikutnya.
+
+Browser tetap diberi label `mock: true`; Simpan hanya mengonfirmasi unduhan
+dimulai, bukan berkas sudah tersimpan. Bagikan memakai Web Share jika tersedia;
+jika tidak, tampilkan kegagalan dan gunakan Simpan. Native desktop menghasilkan
+metadata dan bagian game `not_checked`; dialog ekspor native hanya untuk Android.
+
+Laporan tidak menyertakan logcat/trace, payload PAK atau material signing,
+dan tidak diunggah otomatis. **131 tes host lulus** (49 frontend, 39 Rust,
+43 Android), smoke Chromium dan harness Robolectric sudah dijalankan.
+Pengguna melaporkan tes perangkat asli aman pada APK sebelum review pre-commit.
+Review memperbaiki redaksi UID yang diawali penanda `[REDACTED]`; APK setelah
+perbaikan diverifikasi lokal, tanpa mengulang tes perangkat.
+[APK, bukti perangkat dan checklist](docs/android.md#diagnostik-dan-ekspor-wm-28).
+
 ### Kontrak IPC
 
 | Perintah | Argumen | Hasil |
@@ -639,7 +678,8 @@ data contoh dan custom UID. Ekspor diagnostik membedakan `mock: true` dan
 | `wuwa_set_scenario` | `scenario` | `Dashboard` (browser saja) |
 | `wuwa_run` | `requestId`, `operation`, `uidText?` (`apply_uid`) | `Dashboard` |
 | `wuwa_open_setup` | `target`: `game` / `shizuku` | — (native) |
-| `wuwa_diagnostics` | `requestId` | `Diagnostics` (`filename`, `content`) |
+| `wuwa_diagnostics` | `requestId` | `DiagnosticReport` (`schemaVersion`, `sections`, `privacy`, `errors`) |
+| `wuwa_export_diagnostics` | `action`: `save` / `share`, `content`: JSON teredaksi | `DiagnosticExportResult` (`saved` / `cancelled` / `failed` / `share_opened`; Android) |
 | `wuwa_trace_enabled` | — | Native debug recording enabled (`boolean`) |
 | `wuwa_ui_trace` | `requestId`, `event`, `frontendUs` | —; fixed events, recording disabled by native release builds |
 
@@ -652,7 +692,9 @@ UID, repair, dan uninstall memakai grant metode terpilih, bukan wajib Shizuku.
 menandakan berkas sebelum Tauri; `repair` memilih migrasi offline untuk kondisi
 ini, atau pemulihan jurnal bila `recoveryPending` aktif. Browser juga menyediakan
 skenario `legacy`; state simulasi bukan sumber migrasi data Android.
-Diagnostik mencatat `android-root` atau `android-shizuku`, sesuai pilihan.
+Diagnostik mencatat `android-root` atau `android-shizuku` saat probe berhasil;
+`android` ketika probe gagal, dan `desktop-unsupported` di desktop. Helper
+frontend menambahkan history/redaksi lalu menghasilkan `filename`/`content`.
 Operasi mutasi bersamaan ditolak. Kontrak state berada di `src/model.ts`;
 installer/downloader berada di `src-tauri/src/pak/`, orkestrasi di
 `src-tauri/src/native.rs`, dan bridge di `src-tauri/src/android.rs`.

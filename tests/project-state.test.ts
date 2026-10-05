@@ -176,7 +176,7 @@ describe("maintenance transitions", () => {
     d.access = { method: "root", granted: false };
     d.patch.installed = true;
     tools(state(d, "draft", true));
-    for (const name of ["request_root", "use_root", "use_shizuku", "refresh", "repair", "uninstall", "export-diagnostics"])
+    for (const name of ["request_root", "use_root", "use_shizuku", "refresh", "repair", "uninstall", "save-diagnostics", "share-diagnostics"])
       expect(action(name).disabled).toBe(true);
   });
 });

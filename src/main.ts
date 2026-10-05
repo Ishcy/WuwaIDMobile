@@ -1,4 +1,5 @@
 import { api } from "./ipc";
+import { diagnosticExportMessage } from "./diagnostics";
 import { appUpdateBusy, handleAppUpdate, initAppUpdates, renderAppUpdate } from "./app-update";
 import {
   CONTENT_VERSION,
@@ -315,18 +316,12 @@ app.addEventListener("click", async (event) => {
     });
   else if (action === "restore-uid") await operate("restore_uid");
   else if (action === "uninstall") dialog.showModal();
-  else if (action === "export-diagnostics")
+  else if (action === "save-diagnostics" || action === "share-diagnostics")
     await execute(async () => {
-      const report = await api.diagnostics();
-      const url = URL.createObjectURL(
-        new Blob([report.content], { type: "application/json" }),
-      );
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = report.filename;
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-      notify("Diagnostik diekspor.");
+      const result = await api.exportDiagnostics(action === "save-diagnostics" ? "save" : "share");
+      const message = diagnosticExportMessage(result);
+      if (result.status === "failed") throw new Error(message);
+      notify(message);
     });
   else if (action === "setup-game" || action === "setup-shizuku") {
     if (state.dashboard.mode === "native") {

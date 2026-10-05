@@ -1,9 +1,12 @@
 import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { diagnosticHistory, exportInBrowser, serializeDiagnostics } from "./diagnostics";
 import type {
   AppUpdateStatus,
   Dashboard,
   Diagnostics,
+  DiagnosticReport,
+  DiagnosticExportResult,
   Operation,
   Progress,
   Scenario,
@@ -15,6 +18,7 @@ const progressListeners = new Set<(progress: Progress) => void>();
 let recording = false;
 let nextRequest = 0;
 let busyRequest: number | undefined;
+let activeUid: string | null = null;
 function progressReceived(progress: Progress) {
   for (const listener of progressListeners) listener(progress);
 }
@@ -31,11 +35,21 @@ async function command<T>(
   name: string,
   args?: Record<string, unknown>,
 ): Promise<T> {
-  await ready;
-  const requestId = busyRequest ?? ++nextRequest;
-  const result = await invoke<T>(name, { ...args, requestId });
-  if (recording) await uiTrace(requestId, "response");
-  return result;
+  const uidText = typeof args?.uidText === "string" ? args.uidText : undefined;
+  try {
+    await ready;
+    const requestId = busyRequest ?? ++nextRequest;
+    const result = await invoke<T>(name, { ...args, requestId });
+    if (name === "wuwa_load" || name === "wuwa_run" || name === "wuwa_set_scenario")
+      activeUid = (result as Dashboard).uid.custom;
+    if (recording) await uiTrace(requestId, "response");
+    return result;
+  } catch (error) {
+    const operation = typeof args?.operation === "string" ? args.operation
+      : typeof args?.action === "string" ? `${name}:${args.action}` : name;
+    diagnosticHistory.record(operation, error, [activeUid, uidText, uidText?.trim()]);
+    throw error;
+  }
 }
 
 async function uiTrace(requestId: number, event: "busy_start" | "busy_end" | "response", startedUs?: number) {
@@ -68,7 +82,19 @@ export const api = {
   },
   run: (operation: Operation, uidText?: string) =>
     command<Dashboard>("wuwa_run", { operation, uidText }),
-  diagnostics: () => command<Diagnostics>("wuwa_diagnostics"),
+  async diagnostics(): Promise<Diagnostics> {
+    const report = await command<DiagnosticReport>("wuwa_diagnostics");
+    return serializeDiagnostics(report, diagnosticHistory, [activeUid]);
+  },
+  async exportDiagnostics(action: "save" | "share"): Promise<DiagnosticExportResult> {
+    const report = await api.diagnostics();
+    const result = native
+      ? await command<DiagnosticExportResult>("wuwa_export_diagnostics", { action, content: report.content })
+      : await exportInBrowser(action, report);
+    if (result.status === "failed")
+      diagnosticHistory.record(`diagnostics:${action}`, result.message ?? "Ekspor gagal.", [activeUid]);
+    return result;
+  },
   openSetup: (target: "game" | "shizuku") =>
     command<void>("wuwa_open_setup", { target }),
   appUpdate(action: "status" | "check" | "download" | "install", onProgress?: (progress: Progress) => void): Promise<AppUpdateStatus> {

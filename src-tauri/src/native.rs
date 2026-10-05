@@ -84,13 +84,8 @@ struct Uid {
     original: &'static str,
     custom: Option<String>,
 }
-#[derive(Serialize)]
-pub struct Diagnostics {
-    filename: &'static str,
-    content: String,
-}
 
-fn timestamp() -> u64 {
+pub(crate) fn timestamp() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -107,7 +102,7 @@ fn empty_status() -> InstallStatus {
         custom_uid: None,
     }
 }
-fn current_release(app: &AppHandle) -> PakResult<Option<Release>> {
+pub(crate) fn current_release(app: &AppHandle) -> PakResult<Option<Release>> {
     app.state::<Arc<NativeState>>()
         .release
         .lock()
@@ -425,18 +420,6 @@ pub async fn wuwa_open_setup(app: AppHandle, target: String) -> PakResult<()> {
     .map_err(|e| e.to_string())?
 }
 
-#[tauri::command]
-pub async fn wuwa_diagnostics(app: AppHandle, request_id: u64) -> PakResult<Diagnostics> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let _request = Request::enter(request_id);
-        let _phase = Span::new("diagnostics");
-        let dashboard = load_dashboard(&app, false, None)?;
-        let content = serde_json::to_string_pretty(&serde_json::json!({
-            "mock": false, "backend": if cfg!(target_os = "android") { format!("android-{}", dashboard.access.method) } else { "desktop-unsupported".into() }, "dashboard": dashboard,
-        })).map_err(|e| e.to_string())?;
-        Ok(Diagnostics { filename: "wuwaidmobile-diagnostics.json", content })
-    }).await.map_err(|e| e.to_string())?
-}
 
 #[cfg(test)]
 mod access_tests {

@@ -340,7 +340,9 @@ memerlukan server opsi CLI Tauri aktif dan default universal mencoba empat ABI.
 Ketiga properti target membatasi packaging ke ARM64. Jangan memakai pengecualian
 ini setelah mengubah source native tanpa membangun ulang lewat CLI Tauri.
 
-Artefak yang sudah dibuat:
+Artefak hasil WM-27 (checksum historis; APK debug pada path yang sama kini
+digantikan build WM-28 di bawah). Untuk mengulang instrumentasi, bangun ulang
+pasangan APK aplikasi/tes dengan perintah di atas:
 
 ```text
 src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
@@ -374,6 +376,141 @@ mencakup kedua package game yang tersedia, kedua metode akses, izin ditolak lalu
 diberikan, service terputus, install/UID/repair/uninstall, pemulihan transaksi dan
 migrasi legacy yang valid, serta game setelah pemasangan. Jangan menyatakan
 performa membaik atau semua skenario perangkat lulus dari tes host/build saja.
+
+## Diagnostik dan ekspor (WM-28)
+
+Laporan `schemaVersion: 1` berisi `generatedAt`, `mock`, `backend`, `sections`,
+`privacy` dan `errors`. Bagian application/device/probe/resource/patch/release
+dikumpulkan secara independen. `status: ok` berarti pemeriksaan selesai,
+bukan berarti pemasangan pasti sehat: baca `patch.data.healthy` dan pesan masalah.
+`error` atau `not_checked` memakai `data: null`; jangan mengartikannya sebagai
+`installed: false`. Metadata perangkat tidak mencakup serial/ID akun.
+
+Rilis PAK hanya dibaca dari cache sesi. Diagnostik tidak memasang PAK, meminta
+grant root atau mengunggah laporan. UID kustom dihilangkan; flag `uidCustomized`
+hanya tersedia setelah inspeksi berhasil. Pesan bebas meredaksi UID aktif dan
+input UID operasi yang diketahui. History hanya sesi frontend, 20 error terakhir,
+pesan yang disimpan dibatasi 1024 unit UTF-16 setelah redaksi. Serialisasi dapat
+sedikit memperpanjang pesan dengan penanda redaksi; batas 20 entri tetap berlaku.
+Muat ulang frontend mengosongkan history.
+Logcat/trace tidak dibundel.
+
+### Alur Android
+
+- **Simpan diagnostik**: `ACTION_CREATE_DOCUMENT`, MIME `application/json`;
+  simpan byte UTF-8 ke URI `content://` pilihan pengguna. Baru berstatus `saved`
+  setelah write/flush/close berhasil. `cancelled` tidak menulis; URI hilang,
+  hasil dialog tidak valid, write/close gagal atau lifecycle ditutup tidak
+  dilaporkan sebagai sukses. Kegagalan provider dapat meninggalkan dokumen
+  parsial; status tetap gagal.
+- **Bagikan diagnostik**: `ACTION_SEND` dalam chooser, FileProvider dan ClipData
+  dengan grant read-only. Setiap laporan memakai URI unik agar aksi berikutnya
+  tidak mengubah byte yang dibaca penerima sebelumnya. Hanya subdirektori cache
+  `diagnostics/` ditambahkan; cakupan updater `app-updates/` tetap ada.
+  Laporan milik fitur yang lebih tua dari 24 jam dihapus pada aksi share berikutnya.
+  `share_opened` berarti chooser terbuka, bukan pengiriman diterima.
+- Satu ekspor aktif menahan snapshot sampai hasil dialog/worker selesai.
+  Lifecycle menolak request yang belum selesai dan mengabaikan callback terlambat.
+- Browser memakai unduhan Blob (`download_started`, bukan `saved`) dan Web Share
+  jika didukung. Native desktop tidak menyediakan dialog ekspor Android.
+
+### Verifikasi lokal
+
+Implementasi awal selesai pada **putaran 3 dari batas 3**, tanpa subagent,
+operasi Orca, commit/push atau tes perangkat. Putaran 1 menemukan akses adapter Rust privat
+dan benturan shadow OS dengan suite updater. Putaran 2 memperbaikinya, tetapi
+fixture symlink Rust berada di path yang tidak diperiksa. Putaran 3 memakai
+`PATCH_DIRECTORY` aktual tanpa melemahkan assertion; seluruh gate lokal lulus.
+
+| Suite | Lulus |
+|---|---:|
+| Frontend | 48 |
+| Rust | 39 |
+| Android host | 43 |
+| **Total** | **130** |
+
+Tambahan WM-28: 7 tes frontend untuk batas history/privacy dan keadaan unknown,
+6 Rust untuk laporan parsial/discovery/inspeksi serta enum redaksi, dan 9
+Robolectric untuk simpan UTF-8 dan close, pembatalan pada API 24, write/close
+failure, URI/hasil dialog tidak valid, konkurensi, lifecycle, snapshot share
+read-only yang immutable, serta metadata aplikasi gagal dengan metadata perangkat
+tetap tersedia. Harness memakai shadow OS yang sama dengan suite updater.
+Ini simulasi Android di host, bukan interaksi DocumentsUI/chooser pada perangkat.
+
+Perintah dari root repository, dengan environment Android lokal:
+
+```sh
+npm test
+npm run build
+cargo test --manifest-path src-tauri/Cargo.toml --all-targets
+env JAVA_HOME=/opt/android-studio/jbr ANDROID_HOME=/home/nozomi/Android/Sdk \
+  ANDROID_SDK_ROOT=/home/nozomi/Android/Sdk NDK_HOME=/opt/android-ndk \
+  ./src-tauri/gen/android/gradlew -p src-tauri/gen/android \
+  :app:testUniversalDebugUnitTest --no-configuration-cache --console=plain
+env JAVA_HOME=/opt/android-studio/jbr ANDROID_HOME=/home/nozomi/Android/Sdk \
+  ANDROID_SDK_ROOT=/home/nozomi/Android/Sdk NDK_HOME=/opt/android-ndk \
+  npm run tauri android build -- --debug --apk --target aarch64
+```
+
+Smoke Chromium menekan Simpan setelah menerapkan UID privat, mengunduh dan
+memparse JSON berversi tanpa teks UID tersebut, menjalankan 25 kegagalan IPC
+dengan hasil 20 entri, memeriksa akses tanpa grant (`data: null`) dan resource
+gagal, serta melihat kegagalan jujur saat Web Share tidak tersedia. Permukaan UI
+diamati dan tidak menghasilkan error browser. Berkas JSON smoke sementara
+dihapus setelah pemeriksaan. Warning Rust/Java/AGP dan format baseline di luar
+cakupan tidak disembunyikan; workflow GitHub tidak dijalankan.
+
+### Review pre-commit dan bukti perangkat
+
+Pengguna menjalankan `adb devices` dengan hasil perangkat berstatus `device`,
+kemudian memasang APK debug dengan `adb install -r` dan hasil `Success`.
+Pengguna selanjutnya melaporkan **“tes device asli aman”** pada APK implementasi
+awal dengan SHA-256
+`cabc8dd7c7a17eeba283a03f4ee67cccfe4b8663acc8d32e6e98c0967bdcb4d4`.
+Ini hasil pengujian pengguna, bukan pengujian ulang asisten. Versi Android,
+provider, penerima dan rincian setiap skenario tidak dilaporkan; tidak diasumsikan.
+
+Review pre-commit berikutnya menemukan UID valid yang diawali `[REDACTED]`
+dapat lolos karena regex memilih penanda sebelum literal UID lengkap.
+Regresi gagal sebelum perbaikan dan lulus setelah semua literal, termasuk
+penanda, dicocokkan dari yang terpanjang. Penanda yang sudah ada tetap stabil.
+Tambahan satu tes privacy menghasilkan **131 tes host lulus**:
+49 frontend, 39 Rust dan 43 Android. Build frontend, smoke laporan Chromium
+untuk UID tersebut, dan build APK debug ARM64 juga lulus. APK setelah perbaikan
+memiliki checksum di bawah; tidak dipasang atau diuji ulang oleh asisten.
+
+### APK dan checklist pengguna
+
+APK debug ARM64 setelah review pre-commit:
+
+```text
+src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
+SHA-256: 45945624d24dca31e0b0d8fa2fe65bdf361d03178dba204b10062c55de57fc11
+```
+
+Package debug berbeda dari release; ini bukan kandidat upgrade release WM-26.
+APK release tetap memiliki SHA-256
+`f5a089582f140d0eef19c5ab4c4a6a692f2351b2fa74a579441d424eefa85565`.
+Material signing, trace mentah dan berkas game tidak diubah.
+
+**Hanya pengguna yang menjalankan pada perangkat asli**:
+
+1. Pasang APK debug melalui pengelola berkas, lalu Perawatan → Simpan diagnostik.
+   Pilih penyimpanan lokal dan buka JSON hasilnya; pastikan UTF-8, versi aplikasi,
+   SDK/ABI dan status akses sesuai perangkat.
+2. Batalkan pemilih dokumen, kemudian coba simpan lagi. Tidak boleh muncul
+   notifikasi tersimpan pada pembatalan atau kegagalan provider.
+3. Bagikan ke aplikasi penerima yang tersedia dan buka JSON di sana. Bandingkan
+   isi dengan laporan yang disimpan; jangan menganggap chooser terbuka sebagai
+   pengiriman sukses. Coba aksi berikutnya untuk memastikan snapshot lama tetap.
+4. Periksa tanpa grant, dengan Shizuku/root aktif, dan setelah service terputus.
+   Laporan parsial tetap harus tersedia; bagian tak diperiksa harus bernilai null,
+   bukan klaim terjemahan tidak terpasang.
+5. Terapkan UID kustom, buat kegagalan operasi yang relevan, lalu simpan/bagikan.
+   Teks UID tidak boleh muncul dalam laporan atau error yang mengetahui nilai itu;
+   history maksimal 20, dan hilang setelah frontend dimuat ulang.
+6. Catat Android, provider penyimpanan, aplikasi penerima, hasil/batal/gagal dan
+   batas skenario yang diuji. Integrasi tersebut belum diverifikasi asisten.
 
 ## Referensi
 
