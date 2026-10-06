@@ -22,6 +22,7 @@ class MainActivity : Activity() {
     private lateinit var binding: ActivityMainBinding
     private lateinit var shizuku: ShizukuFileClient
     private lateinit var root: RootFileClient
+    private lateinit var axManager: AxeronFileClient
     private lateinit var releaseStore: ReleaseStore
 
     @Volatile
@@ -66,6 +67,7 @@ class MainActivity : Activity() {
                 runOnUiThread { refresh(fetchNetwork = false) }
             }
         root = RootFileClient(this)
+        axManager = AxeronFileClient(this)
 
         binding.primaryButton.setOnClickListener { performPrimaryAction() }
         binding.refreshButton.setOnClickListener { refresh(fetchNetwork = true) }
@@ -76,6 +78,7 @@ class MainActivity : Activity() {
         renderRelease(latestRelease, latestRelease?.let { "Cache rilis terakhir" })
         renderAppUpdate(null, checked = false, warning = null)
         shizuku.start()
+        axManager.start { refresh(fetchNetwork = false) }
         refresh(fetchNetwork = true)
     }
 
@@ -91,6 +94,7 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         refreshGeneration.incrementAndGet()
         shizuku.stop()
+        axManager.stop { refresh(fetchNetwork = false) }
         executor.shutdownNow()
         super.onDestroy()
     }
@@ -127,13 +131,22 @@ class MainActivity : Activity() {
 
             if (fetchNetwork || (rootActive && root.lastError().isNotBlank())) root.invalidateProbe()
             rootActive = root.isAvailable()
-            val available = rootActive || shizuku.isAvailable()
-            val permission = rootActive || (available && shizuku.hasPermission())
-            val serviceReady = rootActive || (permission && shizuku.isReady())
-            if (!rootActive && permission && !serviceReady) runOnUiThread { shizuku.bind() }
+            val shizukuAvailable = shizuku.isAvailable()
+            val shizukuPermission = shizukuAvailable && shizuku.hasPermission()
+            val shizukuReady = shizukuPermission && shizuku.isReady()
+            val axManagerAvailable = axManager.isAvailable()
+            val axManagerPermission = axManagerAvailable && axManager.hasPermission()
+            val axManagerReady = axManagerPermission && axManager.isReady()
+            val available = rootActive || shizukuAvailable || axManagerAvailable
+            val permission = rootActive || shizukuPermission || axManagerPermission
+            val serviceReady = rootActive || shizukuReady
+            val privilegedReady = rootActive || shizukuReady || axManagerReady
+            if (!rootActive && shizukuPermission && !shizukuReady && !axManagerReady) {
+                runOnUiThread { shizuku.bind() }
+            }
 
             val inspection =
-                if (serviceReady) {
+                if (privilegedReady) {
                     runCatching { GamePaths(privilegedFiles(), backendLabel = backendLabel()).inspect(release) }.getOrElse { error ->
                         if (generation == refreshGeneration.get()) {
                             runOnUiThread { renderError(readableError(error)) }
@@ -146,9 +159,12 @@ class MainActivity : Activity() {
 
             val inputs =
                 StateInputs(
-                    shizukuAvailable = available,
-                    shizukuPermission = permission,
+                    shizukuAvailable = shizukuAvailable,
+                    shizukuPermission = shizukuPermission,
                     serviceReady = serviceReady,
+                    axManagerAvailable = axManagerAvailable,
+                    axManagerPermission = axManagerPermission,
+                    axManagerReady = axManagerReady,
                     resourceVersion = inspection?.resourceVersion,
                     conflicts = inspection?.conflicts.orEmpty(),
                     anyOwnedPatch = inspection?.anyOwnedPatch == true,
@@ -166,12 +182,15 @@ class MainActivity : Activity() {
                     if (rootActive) {
                         add("Root: siap")
                     } else {
-                        add("Shizuku: ${shizukuSummary(available, permission, serviceReady)}")
+                        add("Shizuku: ${shizukuSummary(shizukuAvailable, shizukuPermission, shizukuReady)}")
                         shizuku.connectionDiagnostic().takeIf(String::isNotBlank)?.lineSequence()?.forEach {
                             add("UserService: $it")
                         }
+                        add("AxManager: ${axManagerSummary(axManagerAvailable, axManagerPermission, axManagerReady)}")
                     }
-                    privilegedFiles().lastError().takeIf(String::isNotBlank)?.let { add("File service: $it") }
+                    if (privilegedReady) {
+                        privilegedFiles().lastError().takeIf(String::isNotBlank)?.let { add("File service: $it") }
+                    }
                     addAll(inspection?.diagnostics.orEmpty())
                     release?.let {
                         add("Release: ${it.tag}")
@@ -200,7 +219,7 @@ class MainActivity : Activity() {
     private fun performPrimaryAction() {
         when (currentStatus) {
             LauncherStatus.NEEDS_SHIZUKU -> {
-                handleShizukuAction()
+                handlePrivilegedBackendAction()
             }
 
             LauncherStatus.GAME_NOT_READY, LauncherStatus.READY -> {
@@ -226,15 +245,31 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun handleShizukuAction() {
+    private fun handlePrivilegedBackendAction() {
         when {
-            !shizuku.isAvailable() -> openShizukuManager()
-            !shizuku.hasPermission() -> shizuku.requestPermission()
-            shizuku.isBinding() -> return
-            else -> shizuku.reconnect()
+            axManager.isAvailable() && !axManager.hasPermission() -> {
+                axManager.requestPermission()
+                toast("Berikan izin AXManager untuk WuwaID Mobile, lalu tekan periksa ulang.")
+            }
+            axManager.isAvailable() && axManager.isReady() -> {
+                refresh(fetchNetwork = false)
+            }
+            shizuku.isAvailable() && !shizuku.hasPermission() -> {
+                shizuku.requestPermission()
+                refresh(fetchNetwork = false)
+            }
+            shizuku.isAvailable() -> {
+                if (!shizuku.isBinding()) shizuku.bind()
+                refresh(fetchNetwork = false)
+            }
+            isAxManagerInstalled() -> {
+                openAxManager()
+            }
+            else -> {
+                openShizukuManager()
+            }
         }
         root.invalidateProbe()
-        refresh(fetchNetwork = false)
     }
 
     private fun confirmSendDiagnostics() {
@@ -281,9 +316,9 @@ class MainActivity : Activity() {
             refresh(fetchNetwork = true)
             return
         }
-        if (!rootActive && !shizuku.isReady()) {
+        if (!rootActive && !shizuku.isReady() && !axManager.isReady()) {
             currentStatus = LauncherStatus.NEEDS_SHIZUKU
-            handleShizukuAction()
+            handlePrivilegedBackendAction()
             return
         }
 
@@ -543,16 +578,25 @@ class MainActivity : Activity() {
             when (state) {
                 LauncherStatus.NEEDS_SHIZUKU -> {
                     when {
-                        !inputs.shizukuAvailable -> {
+                        inputs.axManagerAvailable && !inputs.axManagerPermission -> {
                             StatusUi(
-                                "Shizuku belum berjalan",
-                                "Pasang atau aktifkan Shizuku, lalu kembali ke aplikasi.",
-                                "Buka Shizuku",
-                                R.color.danger,
+                                "Izin AxManager diperlukan",
+                                "Aktifkan AX-Permission Intercept di AxManager, lalu izinkan WuwaID Mobile.",
+                                "Beri izin AxManager",
+                                R.color.warning,
                             )
                         }
 
-                        !inputs.shizukuPermission -> {
+                        inputs.axManagerReady -> {
+                            StatusUi(
+                                "AxManager siap",
+                                "Backend AxManager aktif. WuwaID dapat mengakses folder game.",
+                                "Periksa ulang",
+                                R.color.accent,
+                            )
+                        }
+
+                        inputs.shizukuAvailable && !inputs.shizukuPermission -> {
                             StatusUi(
                                 "Izin Shizuku diperlukan",
                                 "WuwaID hanya memakai izin untuk folder data Wuthering Waves.",
@@ -572,10 +616,10 @@ class MainActivity : Activity() {
 
                         else -> {
                             StatusUi(
-                                "Menghubungkan Shizuku",
-                                "UserService belum siap. Tekan tombol untuk mencoba lagi.",
-                                "Hubungkan ulang",
-                                R.color.warning,
+                                "Backend akses belum siap",
+                                "Gunakan AxManager (AX-Permission Intercept) atau Shizuku untuk memberi akses ke folder game.",
+                                if (inputs.axManagerAvailable) "Buka AxManager" else "Buka Shizuku",
+                                R.color.danger,
                             )
                         }
                     }
@@ -641,7 +685,7 @@ class MainActivity : Activity() {
         binding.primaryButton.isEnabled =
             when (state) {
                 LauncherStatus.BUSY, LauncherStatus.CONFLICT -> false
-                LauncherStatus.NEEDS_SHIZUKU -> !inputs.shizukuPermission || !inputs.shizukuAvailable || !shizuku.isBinding()
+                LauncherStatus.NEEDS_SHIZUKU -> true
                 LauncherStatus.NOT_INSTALLED, LauncherStatus.UPDATE_AVAILABLE -> releaseVerifiedOnline
                 else -> true
             }
@@ -743,9 +787,33 @@ class MainActivity : Activity() {
         renderError(message)
     }
 
-    private fun privilegedFiles(): PrivilegedFiles = if (rootActive) root else shizuku
+    private fun privilegedFiles(): PrivilegedFiles =
+        when {
+            rootActive -> root
+            axManager.isReady() -> axManager
+            else -> shizuku
+        }
 
-    private fun backendLabel(): String = if (rootActive) "Root" else "Shizuku"
+    private fun backendLabel(): String =
+        when {
+            rootActive -> "Root"
+            axManager.isReady() -> "AxManager"
+            else -> "Shizuku"
+        }
+
+    private fun isAxManagerInstalled(): Boolean =
+        runCatching {
+            packageManager.getPackageInfo("frb.axeron.manager", 0)
+            true
+        }.getOrDefault(false)
+
+    private fun openAxManager() {
+        try {
+            startActivity(packageManager.getLaunchIntentForPackage("frb.axeron.manager"))
+        } catch (_: Throwable) {
+            toast("AxManager tidak dapat dibuka")
+        }
+    }
 
     private fun diagnosticReport(): String =
         buildString {
@@ -781,6 +849,18 @@ class MainActivity : Activity() {
             !available -> "tidak berjalan"
             !permission -> "berjalan, izin belum diberikan"
             !ready -> "izin diberikan, UserService belum siap"
+            else -> "siap"
+        }
+
+    private fun axManagerSummary(
+        available: Boolean,
+        permission: Boolean,
+        ready: Boolean,
+    ): String =
+        when {
+            !available -> "tidak terdeteksi"
+            !permission -> "terdeteksi, izin belum diberikan"
+            !ready -> "izin ada, file service belum siap"
             else -> "siap"
         }
 

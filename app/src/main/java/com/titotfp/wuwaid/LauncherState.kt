@@ -21,11 +21,14 @@ data class StateInputs(
     val currentHealthy: Boolean,
     val releaseAvailable: Boolean,
     val matchesLatest: Boolean,
+    val axManagerAvailable: Boolean = false,
+    val axManagerPermission: Boolean = false,
+    val axManagerReady: Boolean = false,
 )
 
 object LauncherStateResolver {
     fun resolve(inputs: StateInputs): LauncherStatus = when {
-        !inputs.shizukuAvailable || !inputs.shizukuPermission || !inputs.serviceReady -> LauncherStatus.NEEDS_SHIZUKU
+        !privilegedReady(inputs) -> LauncherStatus.NEEDS_SHIZUKU
         inputs.resourceVersion == null -> LauncherStatus.GAME_NOT_READY
         inputs.conflicts.isNotEmpty() -> LauncherStatus.CONFLICT
         !inputs.currentHealthy && inputs.anyOwnedPatch -> LauncherStatus.UPDATE_AVAILABLE
@@ -33,4 +36,8 @@ object LauncherStateResolver {
         inputs.releaseAvailable && !inputs.matchesLatest -> LauncherStatus.UPDATE_AVAILABLE
         else -> LauncherStatus.READY
     }
+
+    private fun privilegedReady(inputs: StateInputs): Boolean =
+        inputs.serviceReady ||
+            (inputs.axManagerAvailable && inputs.axManagerPermission && inputs.axManagerReady)
 }

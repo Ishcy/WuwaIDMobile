@@ -9,6 +9,7 @@
         <package android:name="com.kurogame.wutheringwaves.global" />
         <package android:name="com.kurogame.wutheringwaves.samsung" />
         <package android:name="moe.shizuku.privileged.api" />
+        <package android:name="frb.axeron.manager" />
     </queries>
 
     <application
@@ -29,6 +30,15 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+
+
+        <provider
+            android:name="frb.axeron.provider.AxeronProvider"
+            android:authorities="${applicationId}.axeron"
+            android:enabled="true"
+            android:exported="true"
+            android:multiprocess="false" />
 
         <provider
             android:name=".UpdateApkProvider"

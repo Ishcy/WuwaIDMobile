@@ -18,6 +18,34 @@ class LauncherStateResolverTest {
         assertEquals(LauncherStatus.READY, resolve(releaseAvailable = false, matchesLatest = false))
     }
 
+
+    @Test
+    fun resolvesAxManagerAsAlternativeBackend() {
+        assertEquals(
+            LauncherStatus.GAME_NOT_READY,
+            resolve(
+                shizukuAvailable = false,
+                shizukuPermission = false,
+                serviceReady = false,
+                axManagerAvailable = true,
+                axManagerPermission = true,
+                axManagerReady = true,
+                resourceVersion = null,
+            ),
+        )
+        assertEquals(
+            LauncherStatus.NEEDS_SHIZUKU,
+            resolve(
+                shizukuAvailable = false,
+                shizukuPermission = false,
+                serviceReady = false,
+                axManagerAvailable = true,
+                axManagerPermission = false,
+                axManagerReady = false,
+            ),
+        )
+    }
+
     private fun resolve(
         shizukuAvailable: Boolean = true,
         shizukuPermission: Boolean = true,
@@ -28,17 +56,23 @@ class LauncherStateResolverTest {
         currentHealthy: Boolean = true,
         releaseAvailable: Boolean = true,
         matchesLatest: Boolean = true,
+        axManagerAvailable: Boolean = false,
+        axManagerPermission: Boolean = false,
+        axManagerReady: Boolean = false,
     ): LauncherStatus = LauncherStateResolver.resolve(
         StateInputs(
-            shizukuAvailable,
-            shizukuPermission,
-            serviceReady,
-            resourceVersion,
-            conflicts,
-            anyOwnedPatch,
-            currentHealthy,
-            releaseAvailable,
-            matchesLatest,
+            shizukuAvailable = shizukuAvailable,
+            shizukuPermission = shizukuPermission,
+            serviceReady = serviceReady,
+            resourceVersion = resourceVersion,
+            conflicts = conflicts,
+            anyOwnedPatch = anyOwnedPatch,
+            currentHealthy = currentHealthy,
+            releaseAvailable = releaseAvailable,
+            matchesLatest = matchesLatest,
+            axManagerAvailable = axManagerAvailable,
+            axManagerPermission = axManagerPermission,
+            axManagerReady = axManagerReady,
         ),
     )
 }
