@@ -102,6 +102,7 @@ pub fn latest() -> PakResult<Release> {
 }
 
 /// Download the release into the cache, verifying size and SHA-256 before publishing it.
+/// Retain only this verified source among reserved regular PAKs in the private cache.
 pub fn download(
     release: &Release,
     cache_dir: &Path,
@@ -121,6 +122,7 @@ pub fn download(
         Ok(true) => {
             drop(cache_check);
             crate::trace::mark("cache", "hit", release.size);
+            retain_verified_source(cache_dir, &cache_path)?;
             emit_progress(progress, 65, "Patch rilis sudah tersedia di cache.");
             return Ok(cache_path);
         }
@@ -202,6 +204,7 @@ pub fn download(
         .map_err(|_| "Tidak dapat menyimpan file PAK ke cache.".to_owned())?;
     staged.publish(&cache_path)?;
     crate::trace::mark("download", "bytes", downloaded);
+    retain_verified_source(cache_dir, &cache_path)?;
 
     emit_progress(progress, 65, "Unduhan dan pemeriksaan integritas selesai.");
     Ok(cache_path)
@@ -406,7 +409,8 @@ fn validate_asset_name(name: &str) -> PakResult<()> {
 }
 
 fn is_pak_name(name: &str) -> bool {
-    name.to_ascii_lowercase().ends_with(".pak")
+    name.rsplit_once('.')
+        .is_some_and(|(_, extension)| extension.eq_ignore_ascii_case("pak"))
 }
 
 fn validate_asset_url(url: &str, tag: &str, asset_name: &str) -> PakResult<()> {
@@ -497,6 +501,51 @@ fn remove_cache_file(path: &Path) -> PakResult<()> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(_) => Err("Tidak dapat menghapus cache PAK yang tidak valid.".to_owned()),
     }
+}
+
+// This dedicated app-private directory reserves <release-tag>-<asset-name> PAKs.
+// Never evict the verified source, staging files, foreign names, symlinks or directories.
+fn retain_verified_source(cache_dir: &Path, retained: &Path) -> PakResult<()> {
+    let entries =
+        fs::read_dir(cache_dir).map_err(|_| "Tidak dapat memeriksa cache PAK lama.".to_owned())?;
+    for entry in entries {
+        let entry = entry.map_err(|_| "Tidak dapat membaca entri cache PAK lama.".to_owned())?;
+        let filename = entry.file_name();
+        if Some(filename.as_os_str()) == retained.file_name() {
+            continue;
+        }
+        let Some(name) = filename.to_str() else {
+            continue;
+        };
+        if !name.starts_with('v') || !is_pak_name(name) {
+            continue;
+        }
+        let generated = name.match_indices('-').any(|(separator, _)| {
+            parse_game_version(&name[..separator]).is_ok()
+                && validate_asset_name(&name[separator + 1..]).is_ok()
+        });
+        if !generated {
+            continue;
+        }
+        let kind = match entry.file_type() {
+            Ok(kind) => kind,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(_) => return Err("Tidak dapat memeriksa tipe cache PAK lama.".to_owned()),
+        };
+        if kind.is_file() {
+            match fs::remove_file(entry.path()) {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(_) => {
+                    return Err(
+                        "Tidak dapat menghapus cache sumber PAK lama; berkas game belum diubah."
+                            .to_owned(),
+                    )
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn emit_progress(callback: &ProgressCallback<'_>, percent: u8, label: &str) {
@@ -628,6 +677,50 @@ mod tests {
         let path = super::download(&release, root.path(), &|_| {}).unwrap();
         assert_eq!(path, cache);
         assert_eq!(fs::read(&path).unwrap(), bytes);
+    }
+
+    #[test]
+    fn verified_cache_retention_removes_obsolete_sources_but_preserves_other_artifacts() {
+        let root = tempfile::tempdir().unwrap();
+        let bytes = b"current verified source";
+        let release = release_fixture(bytes);
+        let current = root
+            .path()
+            .join(format!("{}-{}", release.tag, release.asset_name));
+        let old = root.path().join("v3.6.0-id.1-translation.pak");
+        let foreign = root.path().join("v3.7-translation.pak");
+        let partial = root.path().join(".download-active.pak.part");
+        let directory = root.path().join("v3.5.0-translation.pak");
+        fs::write(&current, bytes).unwrap();
+        fs::write(&old, b"previous source").unwrap();
+        fs::write(&foreign, b"not a generated cache name").unwrap();
+        fs::write(&partial, b"active staging data").unwrap();
+        fs::create_dir(&directory).unwrap();
+        fs::write(directory.join("keep"), b"directory contents").unwrap();
+        #[cfg(unix)]
+        let link = {
+            let link = root.path().join("v3.4.0-translation.pak");
+            std::os::unix::fs::symlink(&foreign, &link).unwrap();
+            link
+        };
+        let mut invalid = release.clone();
+        invalid.sha256 = "invalid digest".into();
+        assert!(super::download(&invalid, root.path(), &|_| {}).is_err());
+        assert_eq!(fs::read(&old).unwrap(), b"previous source");
+        assert_eq!(
+            super::download(&release, root.path(), &|_| {}).unwrap(),
+            current
+        );
+        assert_eq!(fs::read(&current).unwrap(), bytes);
+        assert!(!old.exists());
+        assert_eq!(fs::read(&foreign).unwrap(), b"not a generated cache name");
+        assert_eq!(fs::read(&partial).unwrap(), b"active staging data");
+        assert_eq!(
+            fs::read(directory.join("keep")).unwrap(),
+            b"directory contents"
+        );
+        #[cfg(unix)]
+        assert_eq!(fs::read_link(link).unwrap(), foreign);
     }
 
     #[test]

@@ -481,7 +481,7 @@ memiliki checksum di bawah; tidak dipasang atau diuji ulang oleh asisten.
 
 ### APK dan checklist pengguna
 
-APK debug ARM64 setelah review pre-commit:
+APK debug ARM64 historis setelah review WM-28 (keluaran ini kini diganti WM-29):
 
 ```text
 src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
@@ -512,7 +512,197 @@ Material signing, trace mentah dan berkas game tidak diubah.
 6. Catat Android, provider penyimpanan, aplikasi penerima, hasil/batal/gagal dan
    batas skenario yang diuji. Integrasi tersebut belum diverifikasi asisten.
 
+## Optimasi penggunaan resource APK (WM-29)
+
+Work item dibuat sebelum implementasi. Tahap implementasi dikerjakan tanpa
+subagent, operasi Orca, commit, push, emulator atau perangkat asli. Audit mencakup
+frontend, Rust, storage Android, lifecycle worker/descriptor, cache dan isi APK. Perubahan
+dibatasi pada pemborosan yang terukur; format PAK, mount/signature, rollback,
+IPC, akses Root/Shizuku dan ekspor diagnostik tidak diganti.
+
+### Baseline dan hasil lokal
+
+| Pengukuran | Baseline WM-28 | WM-29 |
+|---|---:|---:|
+| APK debug ARM64 | 479.265.253 byte (457,06 MiB) | 120.178.389 byte (114,61 MiB) |
+| `libwuwaidmobile_lib.so` dalam APK | 236.674.584 byte | 112.417.248 byte |
+| Total section ELF `.debug_*` | 218.904.759 byte | 94.682.666 byte |
+| Kompilasi regex: satu laporan, 20 error | 41 | 2 |
+| Alokasi host: instans baru + metadata 256 KiB | 811.348 byte/panggilan | 283.716 byte/panggilan |
+| Cache fixture, termasuk berkas asing/staging | 458.778 byte | 65.562 byte |
+
+Ukuran APK turun **74,9%**, library native **52,5%**. Pengukuran ZIP memakai
+central directory dan rentang setiap local header/payload; ELF memakai
+`llvm-size -A`. Baseline memuat library aktif sekaligus rentang data ZIP usang
+233.540.556 byte dari packaging incremental. APK akhir tetap memiliki 929 entry
+dan hanya gap 4.096 byte untuk signing block, bukan salinan library lama.
+Build debug berulang sudah dijalankan tanpa `clean`; hasil akhir diperiksa
+signature APK v2 dan alignment native 16 KiB.
+
+Angka alokasi berasal dari harness JVM sementara: lima warmup, sepuluh panggilan
+terukur, file 256 KiB, `ThreadMXBean` dan adapter `Os` ke file host. Adapter
+memungkinkan short read dan perubahan file terkontrol; bukan bukti syscall,
+RSS/PSS atau Binder pada Android. Kompilasi regex dihitung pada modul frontend
+yang benar-benar dipakai UI dengan 20 error dan UID aktif. Waktu satu sampel
+browser maupun heap pada layout berbeda tidak dipakai sebagai klaim CPU/memori.
+**CPU, baterai, startup dan RSS/PSS perangkat belum diukur.**
+
+### Perubahan dan batasnya
+
+- **Packaging/build:** `profile.dev.debug = 1` mempertahankan informasi
+  modul/baris dan backtrace, tetapi bukan detail penuh tipe/variabel lokal dari
+  build Rust aplikasi. `opt-level = 2`, debug assertions, overflow checks dan
+  trace tetap; gunakan `CARGO_PROFILE_DEV_DEBUG=2` bila perlu debugging detail.
+  Hanya task `package*Debug` dibuat nonincremental dengan
+  `outputs.upToDateWhen { false }`; kompilasi/task lain tetap incremental.
+  Tidak memakai `clean`, stripping penuh atau perubahan profile release.
+  Feature `reqwest/json` yang tidak dipakai dihapus; parsing tetap memakai
+  `serde_json` secara eksplisit, download tetap streaming dengan TLS.
+- **Android storage:** `read_text` mengalokasikan satu `ByteArray` berukuran
+  file yang sudah diperiksa dan mengisi sampai selesai, tanpa scratch 64 KiB,
+  `ByteArrayOutputStream` atau salinan akhir. Hash mengalokasikan buffer 64 KiB
+  hanya ketika diperlukan dan memakai ulang buffer dalam instansi yang sama.
+  Empty file, short read dan batas 256 KiB tetap ditangani; pemeriksaan sebelum/
+  sesudah, no-follow, identitas file dan ownership/penutupan FD tetap berlaku.
+  Tidak menambahkan cache metadata/hash yang dapat menyembunyikan perubahan.
+  UserService Shizuku versi **3 → 4**, sesuai kontrak API untuk membuat ulang
+  service yang kodenya berubah setelah upgrade; AIDL dan tag tetap sama.
+- **Diagnostik frontend:** pola UID literal, escaped, unik dan longest-first
+  dibangun sekali per snapshot/serialisasi, bukan per pesan/property. Penanda
+  `[REDACTED]`, UID yang mengandung penanda atau karakter regex, secret yang
+  baru diketahui kemudian, history 20, batas pesan dan enum protokol tetap
+  terlindungi. Pola tidak disimpan lintas panggilan/sesi.
+- **Cache PAK:** direktori privat `release-paks` mencadangkan nama
+  `<tag-rilis>-<nama-asset>.pak`. Sesudah cache hit diverifikasi atau download
+  dipublikasikan secara atomik dengan ukuran/SHA-256 benar, sumber regular lama
+  yang cocok dengan validator tag/asset dihapus; sumber saat ini dipertahankan.
+  Kegagalan metadata, transfer atau integritas sebelum verifikasi/publikasi
+  tidak mengeviksikan sumber lama. Nama asing, non-UTF-8, symlink, direktori dan
+  staging `.part` tidak dihapus, sehingga batas satu sumber bukan klaim batas
+  seluruh isi direktori. Kegagalan inspeksi/penghapusan cache menghentikan
+  operasi sebelum penulisan game, tetapi eviksi yang sudah berhasil tidak
+  dipulihkan. Kegagalan instalasi sesudah retensi juga tidak memulihkan cache
+  lama; sumber saat ini sudah terverifikasi dan rollback game tidak bergantung
+  pada sumber cache lama. Fixture smoke mengeviksikan 393.216 byte sambil
+  mempertahankan byte sumber/artefak lain.
+- **Jalur tetap:** HTTP client/streaming, guard operasi, worker dan pengelolaan
+  descriptor yang ada digunakan kembali. Tidak menambah polling, retry,
+  telemetry atau hasil probe sintetis. Rebuild UID tetap memakai buffer entry
+  yang dibutuhkan API repak; tidak mengklaim rebuild PAK constant-memory atau
+  mengubah format demi mengurangi buffer.
+
+### Verifikasi dan artefak
+
+**133 tes host lulus:** 50 frontend, 40 Rust dan 43 Android/Robolectric.
+Regresi cache gagal sebelum retensi ditambahkan dan lulus sesudahnya; metadata
+tidak valid tetap mempertahankan sumber lama, sementara keberhasilan
+mempertahankan sumber saat ini serta file asing, staging, direktori dan symlink.
+Regresi frontend membuktikan redaksi UID yang diketahui belakangan tetap
+independen pada history dan pesan laporan parsial.
+
+Smoke nyata: Chromium menjalankan UID kustom dan ekspor JSON dari UI; unduhan
+diparsing, 20 error teredaksi dan UID privat tidak ditemukan. Harness storage
+sementara memeriksa short read, ukuran 0/1/65.535/65.536/65.537/262.144,
+penolakan 262.145, truncation/growth, penutupan FD dan hash baru setelah isi
+diganti. Program Rust sementara memakai downloader produksi melalui cache
+terverifikasi offline dan membuktikan retensi berdasarkan byte file. Seluruh
+source smoke sementara dihapus; delapan tes instrumentasi yang ada hanya
+dibangun/dipaketkan, **belum dijalankan** pada perangkat.
+
+```bash
+npm test
+npm run build
+cargo test --manifest-path src-tauri/Cargo.toml --all-targets
+env JAVA_HOME=/opt/android-studio/jbr \
+  ANDROID_HOME=/home/nozomi/Android/Sdk \
+  ANDROID_SDK_ROOT=/home/nozomi/Android/Sdk NDK_HOME=/opt/android-ndk \
+  npm run tauri android build -- --debug --apk --target aarch64
+```
+
+Setelah build Tauri ARM64 aktual di atas, task host/instrumentasi menggunakan
+binary native yang sudah dibangun, bukan menjalankan hook Rust tanpa server
+CLI Tauri. Properti berikut membatasi target ke ARM64 (tanpanya, Gradle juga
+menjadwalkan hook ABI lain):
+
+```bash
+env JAVA_HOME=/opt/android-studio/jbr \
+  ANDROID_HOME=/home/nozomi/Android/Sdk \
+  ANDROID_SDK_ROOT=/home/nozomi/Android/Sdk NDK_HOME=/opt/android-ndk \
+  src-tauri/gen/android/gradlew -p src-tauri/gen/android \
+  :app:testUniversalDebugUnitTest :app:assembleUniversalDebugAndroidTest \
+  -PabiList=arm64-v8a -ParchList=arm64 -PtargetList=aarch64 \
+  -x :app:rustBuildArm64Debug --no-configuration-cache --console=plain
+```
+
+APK debug final, 120.178.389 byte:
+
+```text
+src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
+SHA-256: b2d6d79e3512befc3f41927f0182b0168fd65098d15d172556aa657f1ff3e570
+```
+
+APK tes, 657.410 byte, dipasang bersama APK debug oleh pengguna jika diperlukan:
+
+```text
+src-tauri/gen/android/app/build/outputs/apk/androidTest/universal/debug/app-universal-debug-androidTest.apk
+SHA-256: 91f834aee9ffa6b258b5ad24e1b9e54bdedcde6ab10dc3d4b79dd3a46a430329
+```
+
+APK release tetap SHA-256
+`f5a089582f140d0eef19c5ab4c4a6a692f2351b2fa74a579441d424eefa85565`.
+Warnings host Rust untuk jalur native yang tidak aktif dan warning
+source/target Java 8 di JDK 25 tidak disembunyikan. Signing material tidak diubah.
+
+### Review pre-commit dan bukti pemasangan
+
+Pengguna melaporkan `adb -s <serial> install -r` pada path APK debug di atas
+berhasil (`Performing Streamed Install` → `Success`). Asisten tidak mengulang
+instalasi atau menjalankan aksi perangkat. Ini bukti pemasangan, bukan hasil
+tes Root/Shizuku, fungsi aplikasi, instrumentasi atau performa perangkat.
+
+Review memperjelas bahwa profile release dan APK release yang sudah ada tetap,
+sementara optimasi runtime juga berlaku pada build release mendatang. Jaminan
+mempertahankan sumber lama dibatasi pada kegagalan sebelum sumber saat ini
+terverifikasi/publikasi; eviksi yang selesai tidak dibatalkan bila instalasi
+kemudian gagal. Tidak ada perubahan kode produk tambahan pada review ini.
+
+Verifikasi ulang pre-commit: **133 tes host lulus** — frontend 50, Rust 40
+(`--all-targets`) dan Android 43; build frontend lulus, tanpa failure/skip.
+Smoke downloader produksi offline
+menghapus 131.072 byte sumber lama sambil mempertahankan sumber terverifikasi,
+file asing, staging, direktori, symlink dan nama non-UTF-8. Metadata tidak valid
+tetap mempertahankan sumber lama. Source smoke sementara kemudian dihapus.
+Checksum APK debug dan release tetap sama dengan bagian artefak di atas; APK
+tidak dibangun ulang atau dipasang ulang pada tahap review.
+
+### Checklist perangkat — pengguna saja
+
+1. Upgrade APK debug tanpa menghapus data; periksa akses Shizuku dan Root,
+   probe metadata, instal/repair/uninstall dan apply/reset UID. Pastikan mount,
+   signature dan file game asli tetap benar; pembaruan Shizuku harus memakai
+   implementasi service baru, termasuk bila service sebelumnya masih hidup.
+2. Jalankan delapan kasus instrumentasi bila diperlukan: batas baca, perubahan
+   file, FD, symlink dan batas storage. Asisten hanya menyiapkan paketnya.
+3. Bandingkan baseline/WM-29 pada Android, WebView, metode akses, resource game,
+   UID, cache cold/warm dan urutan aksi yang sama. Catat startup, idle 60 detik,
+   probe, instal dan apply/reset UID: waktu, CPU dan PSS/RSS. Jangan menyimpulkan
+   peningkatan RAM/baterai dari perubahan ukuran APK/DWARF atau fixture JVM.
+4. Saat ada pergantian rilis nyata, periksa hanya sumber cache rilis saat ini
+   yang tersisa setelah retensi berhasil. Kegagalan metadata/transfer/integritas
+   sebelum verifikasi tidak menghapus sumber sebelumnya; kegagalan setelah
+   eviksi tidak memulihkan cache lama. Staging, artefak asing dan file game asli
+   tidak boleh terkena eviksi.
+5. Ulangi Simpan/Bagikan diagnostik, cancel/failure provider dan pergantian
+   aplikasi/lifecycle. JSON parsial harus jujur, history maksimal 20 dan UID
+   privat tetap teredaksi, termasuk UID berawalan `[REDACTED]`.
+6. Catat APK/hash, perangkat, SDK/WebView, akses, skenario, ukuran file/cache,
+   metode pengukuran dan hasil. Keberhasilan tes perangkat pada WM-28 adalah
+   bukti historis, bukan penerimaan APK WM-29 atau angka performa baru.
+
 ## Referensi
 
 - [Prasyarat Tauri](https://v2.tauri.app/start/prerequisites/)
 - [Perintah Android Tauri CLI](https://v2.tauri.app/reference/cli/#android-build)
+- [Cargo: debug information dan default runtime checks](https://doc.rust-lang.org/cargo/reference/profiles.html#debug)
+- [Gradle: kriteria task incremental/nonincremental](https://docs.gradle.org/current/userguide/custom_tasks.html#incremental_tasks)
+- [Shizuku: UserServiceArgs.version dan recreating service](https://github.com/RikkaApps/Shizuku-API/blob/a27f6e4151ba7b39965ca47edb2bf0aeed7102e5/api/src/main/java/rikka/shizuku/Shizuku.java#L624-L633)

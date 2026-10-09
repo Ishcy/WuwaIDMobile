@@ -46,6 +46,11 @@ val verifyUpgradeSigning = tasks.register("verifyUpgradeSigning") {
 tasks.matching { it.name.startsWith("pre") && it.name.endsWith("ReleaseBuild") }
     .configureEach { dependsOn(verifyUpgradeSigning) }
 
+// Incremental ZIP replacement retains obsolete native-library data in debug APKs.
+// Repackage only debug APKs from all inputs; compilation and other tasks stay incremental.
+tasks.matching { it.name.startsWith("package") && it.name.endsWith("Debug") }
+    .configureEach { outputs.upToDateWhen { false } }
+
 android {
     compileSdk = 36
     namespace = "com.titotfp.wuwaid"

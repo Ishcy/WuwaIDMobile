@@ -4,27 +4,31 @@ import type { Dashboard, DiagnosticError, DiagnosticExportResult, DiagnosticRepo
 export const DIAGNOSTIC_FILENAME = "wuwaidmobile-diagnostics.json";
 const HISTORY_LIMIT = 20;
 
-function redact(message: string, secrets: readonly (string | null | undefined)[]): string {
+function redactionPattern(secrets: readonly (string | null | undefined)[]): RegExp | undefined {
   const values = new Set(secrets.filter((value): value is string => !!value));
-  if (!values.size) return message;
+  if (!values.size) return undefined;
   // Longer UID literals win over the marker; the marker wins over its substrings.
   values.add("[REDACTED]");
-  const pattern = new RegExp([...values].sort((a, b) => b.length - a.length)
+  return new RegExp([...values].sort((a, b) => b.length - a.length)
     .map(value => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "g");
-  return message.replace(pattern, "[REDACTED]");
+}
+
+function redact(message: string, pattern: RegExp | undefined): string {
+  return pattern ? message.replace(pattern, "[REDACTED]") : message;
 }
 
 export class DiagnosticHistory {
   private readonly entries: DiagnosticError[] = [];
 
   record(operation: string, cause: unknown, secrets: readonly (string | null | undefined)[] = []): void {
-    const message = redact(cause instanceof Error ? cause.message : String(cause), secrets);
+    const message = redact(cause instanceof Error ? cause.message : String(cause), redactionPattern(secrets));
     if (this.entries.length === HISTORY_LIMIT) this.entries.shift();
     this.entries.push({ timestamp: Date.now(), operation, message: message.slice(0, 1024) });
   }
 
   snapshot(secrets: readonly (string | null | undefined)[] = []): DiagnosticError[] {
-    return this.entries.map(entry => ({ ...entry, message: redact(entry.message, secrets).slice(0, 1024) }));
+    const pattern = redactionPattern(secrets);
+    return this.entries.map(entry => ({ ...entry, message: redact(entry.message, pattern).slice(0, 1024) }));
   }
 }
 
@@ -32,11 +36,12 @@ export const diagnosticHistory = new DiagnosticHistory();
 
 export function serializeDiagnostics(report: DiagnosticReport, history: DiagnosticHistory,
   secrets: readonly (string | null | undefined)[] = []): Diagnostics {
+  const pattern = redactionPattern(secrets);
   const content = JSON.stringify({ ...report, errors: history.snapshot(secrets) }, (key, value: unknown) => {
     if ((key === "custom" || key === "customUid") && typeof value === "string" && value !== "redacted")
       return "[REDACTED]";
     if (["message", "error", "reason", "storageError"].includes(key) && typeof value === "string")
-      return redact(value, secrets);
+      return redact(value, pattern);
     return value;
   }, 2);
   return { filename: DIAGNOSTIC_FILENAME, content };

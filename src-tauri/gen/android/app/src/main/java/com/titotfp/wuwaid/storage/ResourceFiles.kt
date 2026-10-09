@@ -5,7 +5,6 @@ import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
 import android.system.StructStat
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileDescriptor
 import java.security.MessageDigest
@@ -14,7 +13,7 @@ import org.json.JSONObject
 
 // Constructed only in the privileged Shizuku or root service, never in the application process.
 internal class ResourceFiles(private val gameFiles: File) {
-  private val buffer = ByteArray(64 * 1024)
+  private var hashBuffer: ByteArray? = null
   // UserService serializes calls. Reuse engines, never their previous results.
   private var sha256Engine: MessageDigest? = null
   private var sha1Engine: MessageDigest? = null
@@ -132,20 +131,20 @@ internal class ResourceFiles(private val gameFiles: File) {
         require(second == null) { "Unexpected text arguments" }
         return readRegular(root, requireNotNull(first)) { input, stat ->
           require(stat.st_size <= LIMIT) { "Text resource exceeds the 256 KiB limit" }
-          val output = ByteArrayOutputStream(minOf(stat.st_size.toInt(), 4096))
-          while (true) {
-            val count = Os.read(input, buffer, 0, buffer.size)
-            if (count == 0) break
-            require(output.size() + count <= LIMIT) { "Text resource exceeds the 256 KiB limit" }
-            output.write(buffer, 0, count)
+          val output = ByteArray(stat.st_size.toInt())
+          var size = 0
+          while (size < output.size) {
+            val count = Os.read(input, output, size, output.size - size)
+            require(count > 0) { "Text resource changed while reading" }
+            size += count
           }
-          require(output.size().toLong() == stat.st_size) { "Text resource changed while reading" }
-          output.toByteArray()
+          output
         }
       }
       "hashes" -> {
         require(second == "sha256" || second == "both") { "Unsupported hash request" }
         readRegular(root, requireNotNull(first)) { input, stat ->
+          val buffer = hashBuffer ?: ByteArray(64 * 1024).also { hashBuffer = it }
           val sha256 = (sha256Engine ?: MessageDigest.getInstance("SHA-256").also { sha256Engine = it })
             .apply { reset() }
           val sha1 = if (second == "both") {

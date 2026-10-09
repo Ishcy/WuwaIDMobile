@@ -73,9 +73,10 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
   private var serviceReady: CountDownLatch? = null
   private var requestId = 0L
   private var permissionRequestId = 0L
+  // Increment when privileged storage code changes so Shizuku recreates stale services.
   private val userServiceArgs = Shizuku.UserServiceArgs(
     ComponentName(activity.packageName, StorageUserService::class.java.name)
-  ).daemon(false).tag("wuwaid-storage").version(3).processNameSuffix("wuwaid-storage")
+  ).daemon(false).tag("wuwaid-storage").version(4).processNameSuffix("wuwaid-storage")
   private var serviceConnection: ServiceConnection? = null
   private fun newServiceConnection() = object : ServiceConnection {
     override fun onServiceConnected(name: ComponentName, binder: IBinder) {

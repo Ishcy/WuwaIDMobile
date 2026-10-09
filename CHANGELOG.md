@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Optimize APK resource usage (WM-29): reduce ARM64 debug APK size from
+  479,265,253 to 120,178,389 bytes with limited Rust debug information and fresh
+  debug-only ZIP packaging; leave the release profile, existing release APK and
+  signing material unchanged.
+  Avoid duplicate metadata buffers and eagerly allocated hash scratch space.
+  Reuse a report-scoped redaction pattern without retaining secrets between
+  calls. Retain one verified release source in the private PAK cache while
+  preserving foreign files, staging, directories and symlinks; prune only after
+  source verification, before game writes. Bump Shizuku UserService to version 4
+  so APK upgrades recreate the changed storage implementation.
+  Verify 133 host tests, browser export and real backend cache smoke; package
+  eight existing device cases without running them. Document the debug-detail
+  tradeoff and user-only device/performance checks without claiming Android
+  RSS, CPU or battery gains from host measurements.
+
 - Mature diagnostics and Android export (WM-28): add a versioned, redacted JSON
   report with application/device metadata, independent partial-failure sections
   and explicit not-checked states. Keep the latest 20 session errors with bounded,

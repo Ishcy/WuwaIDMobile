@@ -111,4 +111,23 @@ describe("repeated diagnostic redaction", () => {
     expect(report.sections.patch.data.message).toBe("UID [REDACTED] failed");
     expect(report.errors[0].message).toBe("UID [REDACTED] failed; already [REDACTED]");
   });
+
+  it("redacts late-known UIDs independently across history entries and partial report fields", () => {
+    const secret = "Rover.?🦋";
+    const history = new DiagnosticHistory();
+    history.record("probe", `${"prefix ".repeat(20)}${secret}`);
+    history.record("resource", `${secret} failed`);
+    const d = dashboard();
+    d.resource.ready = false;
+    d.blocker = `probe ${secret}`;
+    const source = mockDiagnostics(d);
+    source.sections.resource.error = `resource ${secret}`;
+    source.sections.patch.reason = `inspect ${secret}`;
+    const report = JSON.parse(serializeDiagnostics(source, history, [secret]).content);
+    expect(report.errors.map((entry: { message: string }) => entry.message))
+      .toEqual([`${"prefix ".repeat(20)}[REDACTED]`, "[REDACTED] failed"]);
+    expect(report.sections.probe.data.storageError).toBe("probe [REDACTED]");
+    expect(report.sections.resource.error).toBe("resource [REDACTED]");
+    expect(report.sections.patch.reason).toBe("inspect [REDACTED]");
+  });
 });

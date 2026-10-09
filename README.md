@@ -670,6 +670,32 @@ Review memperbaiki redaksi UID yang diawali penanda `[REDACTED]`; APK setelah
 perbaikan diverifikasi lokal, tanpa mengulang tes perangkat.
 [APK, bukti perangkat dan checklist](docs/android.md#diagnostik-dan-ekspor-wm-28).
 
+### Optimasi penggunaan resource APK (WM-29)
+
+Audit mencakup frontend, backend Rust/Android, cache sumber PAK dan packaging.
+Hasil lokal pada APK debug ARM64:
+
+| Ukuran/pengukuran | Sebelum | Sesudah |
+|---|---:|---:|
+| APK debug | 479.265.253 byte | 120.178.389 byte (**−74,9%**) |
+| Library native | 236.674.584 byte | 112.417.248 byte |
+| Alokasi host untuk pembacaan metadata 256 KiB | 811.348 byte/panggilan | 283.716 byte/panggilan |
+| Kompilasi regex per laporan dengan 20 error | 41 | 2 |
+
+Pembacaan metadata memakai satu buffer hasil; buffer hash dialokasikan saat
+dibutuhkan dan digunakan ulang dalam instansinya. Cache privat menyimpan satu
+sumber PAK rilis terverifikasi setelah operasi berhasil, tanpa menghapus staging,
+nama asing, direktori atau symlink. Shizuku memakai UserService versi 4 agar
+pembaruan APK tidak menggunakan implementasi storage versi 3.
+
+Debug Rust memakai informasi modul/baris yang lebih kecil, bukan detail penuh
+tipe/variabel lokal; runtime checks dan trace tetap aktif. Packaging debug
+dibuat ulang tanpa membersihkan build lain untuk menghindari data ZIP usang.
+Release dan material signing tidak berubah. **133 tes host lulus**
+(50 frontend, 40 Rust, 43 Android), dengan smoke UI/ekspor dan backend cache.
+Alokasi JVM bukan RSS Android; CPU, baterai dan performa perangkat belum diukur.
+[Metode, APK dan checklist perangkat](docs/android.md#optimasi-penggunaan-resource-apk-wm-29).
+
 ### Kontrak IPC
 
 | Perintah | Argumen | Hasil |
