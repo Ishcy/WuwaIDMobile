@@ -29,7 +29,7 @@ repak = { git = "https://git.xeondev.com/ReversedRoomsMisc/repak.git", rev = "76
 rusqlite = { version = "0.32", features = ["bundled"] }
 tempfile = "3"
 
-[target.'cfg(target_os = "android")'.dependencies]
+[target.'cfg(any(target_os = "android", target_os = "linux"))'.dependencies]
 libc = "0.2"
 
 # Debug APKs retain runtime checks, backtraces and module/line information, not full variable/type data.
@@ -37,10 +37,10 @@ libc = "0.2"
 opt-level = 2
 debug = 1
 
-# Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
+# Favor smaller release code without disabling loop vectorization (`z` does).
 [profile.release]
 codegen-units = 1
 lto = true
-opt-level = 3
+opt-level = "s"
 panic = "abort"
 strip = true

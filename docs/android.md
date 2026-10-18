@@ -79,6 +79,76 @@ APK turun 74,9%; library native 52,5%. ZIP diukur dari central directory dan ren
 
 Angka alokasi berasal dari harness JVM sementara (5 warmup, 10 panggilan, `ThreadMXBean`, adapter `Os` ke file host); bukan syscall, RSS/PSS atau Binder Android. Regex diukur pada modul frontend yang dipakai UI dengan 20 error dan UID aktif. CPU, baterai, startup, dan RSS/PSS perangkat belum diukur.
 
+## Optimasi storage dan APK release (WM-30)
+
+Build sebelum/sesudah memakai source checkout yang sama selain perubahan WM-30: Linux x86_64, Node 24.20.0, Rust 1.97.1, JDK 17.0.20.1, API/Build Tools 36, NDK 27.3.13750724, ARM64, `npm run tauri android build -- --apk --target aarch64`. Identitas tetap `com.titotfp.wuwaid`, 0.4.0/code 8 dan key rilis asli. APK akhir lolos signature v2 dan `zipalign -c -P 16 4`; bukan bukti upgrade/game pada perangkat.
+
+| Pengukuran (byte) | Sebelum | Sesudah | Penurunan |
+|---|---:|---:|---:|
+| APK release ARM64 | 10.550.849 | 9.970.529 | 5,50% |
+| Library native di APK | 8.451.032 | 7.870.712 | 6,87% |
+| Cache PAK setelah operasi pada fixture crash | 12.634.179 | 4.207.297 | 66,70% |
+| Total fixture saat UID Apply sebelum jurnal | 25.257.891 | 12.623.712 | 50,02% |
+| Total fixture saat UID Reset sebelum jurnal | 21.050.594 | 12.623.712 | 40,03% |
+| Cache updater yatim setelah restart | 2.097.154 | 0 | 100% |
+| Maksimum cache updater teramati di callback progres | 17.210 | 8.736 | 49,24% |
+
+Metode dan batas:
+
+- APK: ukuran file dan ZIP central directory. Dominan native; Cargo release beralih `opt-level = 3` → `"s"`, tetap LTO, satu codegen unit, abort, dan strip. `"z"` tidak dipilih agar loop vectorization tidak dimatikan. Tidak ada section `.debug_*` pada kedua ELF. R8/resource shrinking, ikon, locale, ABI, dependensi, dan konfigurasi signing tidak diubah. Pengaruh CPU/startup dari profile `"s"` belum diukur di perangkat.
+- Rust: harness sementara menjalankan kode installer sebenarnya lewat `LocalStorage`, PAK v12 4.207.297 byte dengan SQLite UID valid dan payload 4 MiB. Awal identik: source terverifikasi, satu partial seukuran source, satu derived PAK seukuran source, database yatim 12 KiB. Install → UID Apply → Reset → uninstall berhasil; source dan file game bawaan fixture tetap utuh.
+- Angka native adalah jumlah panjang file reguler pada checkpoint, **bukan high-water mark seluruh syscall**. UID masih memerlukan source, derived PAK, stage, dan pemasangan lama secara bersamaan saat staging; pelepasan derived setelah staging mengurangi footprint saat commit, bukan menghilangkan kebutuhan ruang puncak staging. Cache sumber tunggal tetap tersedia untuk penggunaan offline.
+- Updater: Robolectric API 28, TLS localhost, APK ARM64 sungguhan yang ditandatangani key fixture sementara (8.474 byte). Baseline repository sebelum perubahan dan repository akhir menjalankan skenario sama: restart dengan orphan/partial, unduh kandidat, pilih aset dengan digest baru, unduh dan verifikasi lagi. Pengukuran progres tidak mengamati setiap write metadata. APK final, ukuran/SHA-256, identitas dan signing tetap diverifikasi; ini bukan installer Android asli.
+- Tabel di atas hanya pengukuran host. Hasil Settings perangkat dicatat terpisah di bawah; alokasi blok filesystem, ruang PackageInstaller, dan puncak storage perangkat belum diukur. Penurunan ukuran APK bukan bukti penurunan total storage terpasang.
+
+Audit artifact pembanding awal oleh subagent mengonfirmasi SHA-256, identitas/signing, ARM64, serta kesamaan library optimized dengan output build pada fase pengukuran itu (`src-tauri/target/wm30/qa/host-audit.txt`). **Alignment ZIP bukan alignment ELF**: kedua library awal memiliki `PT_LOAD.p_align = 0x1000` (4 KiB). Kelulusan `zipalign -P 16` tidak membuktikan loading native pada perangkat dengan page size 16 KiB; dukungan runtime tersebut belum diuji.
+
+Artifact pembanding sebelum koreksi lock berada di `src-tauri/target/wm30/`: `baseline-release.apk`, `optimized-release.apk`, dan `SHA256sums.txt`. **Jangan gunakan `optimized-release.apk` untuk tes lanjutan:** pengguna melaporkan operasi PAK gagal pada API lock Android. APK koreksi memakai nama `cache-lock-fixed-release.apk`; baseline/optimized lama dipertahankan hanya untuk provenance pengukuran. Output build standar tetap `src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk`. Artifact tidak dikomit.
+
+APK koreksi lock: **9.970.593 byte**, SHA-256 `a3f6a06b5ecb01c232fa994cd387427e912f78d3633bf175ca37034913974f79`, package/key/0.4.0/code 8 tetap. Signature v2 dan alignment ZIP 16 KiB lolos; library yang dikemas cocok output build dan mengimpor `flock@LIBC`. Sebanyak 42 tes Rust dan smoke lock dua proses lulus. Pengguna kemudian mengonfirmasi tes perangkat aman setelah investigasi konflik PAK manual di bawah; hasil pengukuran artifact awal tidak diganti.
+
+### Hasil QA perangkat asli (bertahap)
+
+Pada fase awal, subagent DeviceQA menguji Samsung SM-A525F, Android 14/API 34, ARM64; Wuthering Waves Global 3.7.0. Package debug tetap dipertahankan. Package release awalnya belum ada: baseline dipasang fresh, lalu diganti optimized memakai `adb install -r`, tanpa uninstall/clear data/downgrade. Optimized yang ditarik dari perangkat cocok byte/digest/signing dengan artifact fase awal.
+
+Settings → App info → Storage, sesudah launch dan cek update manual pada setiap fase:
+
+| Komponen (unit sesuai UI, dibulatkan) | Baseline fresh | Optimized setelah replacement |
+|---|---:|---:|
+| App | 12,24 MB | 11,66 MB |
+| Data | 4,42 MB | 8,63 MB |
+| Cache | 438 KB | 442 KB |
+| Total | 17,11 MB | 20,74 MB |
+
+Komponen App turun, tetapi total naik karena Data bertambah. Data dipertahankan dan urutan pengujian tidak mengisolasi pertumbuhan state/WebView; jangan mengatribusikannya pada perubahan kode atau mengklaim total storage turun. Ini bukan pengukuran peak.
+
+- Cek update manual pada kedua APK menampilkan belum ada stable resmi; API latest mengembalikan 404. Download/PackageInstaller belum diuji; kedua artifact code 8 bukan kandidat versi lebih tinggi.
+- Pada fase awal, Shizuku 13.6 terpasang tetapi UI manager dan WuwaID menyatakan tidak berjalan setelah startup ADB resmi mengembalikan exit 0. Snapshot proses hanya memuat manager, bukan `shizuku_server`; log terfilter tidak memberi penyebab (`qa/shizuku-start-output.txt`). Grant dan operasi game belum diuji pada fase tersebut; exit starter bukan bukti service siap.
+- Patch milik WuwaID dan status adanya UID kustom dipertahankan; teks privat tidak dibaca/disimpan. Empat file resmi sampel (dua mount, satu PAK beserta signature) memiliki SHA-256 sebelum/sesudah yang sama; bukan validasi seluruh tree game.
+- Pengamatan log PID/exit-info tidak menemukan crash/ANR optimized pada jendela uji. Bukti: `src-tauri/target/wm30/qa/`, terutama `storage-settings.txt`, `package-identity.txt`, `runtime-observations.txt`, `game-{initial,final}-sha256.txt` dan screenshot `baseline-storage-breakdown/screen.png`, `optimized-storage-breakdown/screen.png`.
+
+Retest berikutnya memakai APK koreksi lock dan Shizuku wireless debugging yang dinyalakan pengguna. Pengguna mengonfirmasi pemasangan dengan UID bawaan aman, lalu melaporkan UID kustom tidak tampil. Pemeriksaan read-only membuktikan PAK installer dan ketiga baris UID sudah berisi teks kustom, tetapi ada PAK terjemahan manual lain di `Saved/Paks` yang hash-nya identik dengan rilis asli. Sesudah temuan dan instruksi menonaktifkan PAK manual, pengguna mengonfirmasi hasil aman. Ini penerimaan pengguna, bukan retest otomatis; lima siklus, recovery setelah interupsi, peak storage, dan PackageInstaller update lebih tinggi belum dikonfirmasi.
+
+### Konflik PAK manual dengan UID kustom
+
+Jika UID kustom tercatat aktif tetapi game tetap menampilkan UID bawaan, periksa apakah ada terjemahan manual di:
+
+```text
+Android/data/<package-game>/files/UE4Game/Client/Client/Saved/Paks/
+```
+
+Pada perangkat QA ditemukan `pakchunk0-ID-WindowsNoEditor_1000_P.pak` tanpa UID kustom, di luar kepemilikan installer `Resources/<versi>/wuwaid`. PAK manual dapat menimpa database yang sama; status sehat installer hanya memverifikasi berkas miliknya, bukan seluruh urutan mount game.
+
+Tutup paksa game, pindahkan hanya PAK terjemahan manual yang dikenali ke backup di luar direktori game, lalu buka game kembali. Jangan hapus PAK resmi atau berkas `Resources/<versi>/wuwaid`. Jika PAK installer sudah memuat UID kustom, tidak perlu reinstall APK atau mengunduh ulang PAK untuk retest ini. Aplikasi tidak memindahkan/menghapus file manual tersebut otomatis.
+
+### Prosedur QA storage perangkat
+
+1. Catat model/Android, filesystem, package game, metode Root/Shizuku, versi game/PAK, serta kondisi WebView yang sama. Bandingkan kedua APK tanpa uninstall/clear data. Catat ukuran aplikasi/data/cache dari Settings sebelum dan sesudah skenario; ukur puncak dengan tooling yang tersedia dan izin yang sudah diberikan, atau tandai belum terukur.
+2. Ulangi install/update, UID Apply/Reset, repair/recovery, dan uninstall. Periksa hash file game bawaan sebelum/sesudah dan hasil UID/terjemahan di game. Backup/jurnal recovery tidak boleh dibersihkan sebagai cache.
+3. Putuskan jaringan atau hentikan proses saat unduh PAK/UID; setelah membuka ulang, jalankan operasi cache berikutnya. Partial/UID scratch yang namanya direservasi harus hilang; source terverifikasi dan file asing tetap ada. Kegagalan staging/commit harus tetap dapat diperbaiki lewat recovery.
+4. Jalankan [QA updater](#qa-updater-wajib), termasuk versi stabil resmi yang lebih tinggi, installer batal/izin ditolak, retry offline dari APK terverifikasi, dan restart setelah update. Partial/yatim dibersihkan saat restore; APK ready tidak dihapus hanya karena installer batal atau pemeriksaan jaringan gagal.
+5. Ulangi sedikitnya lima siklus pada kondisi sama. Catat byte/MiB sebelum/sesudah dan persentase, kegagalan cleanup, ruang puncak yang benar-benar teramati, serta hasil pass/fail. Hasil host di atas tidak menggantikan penerimaan perangkat.
+
 
 ## Nama dan ikon
 
@@ -146,7 +216,15 @@ cargo test --manifest-path src-tauri/Cargo.toml --all-targets
 
 `ResourceFilesTest` memiliki delapan tes instrumentation: batas teks 256 KiB/file kosong; FD saat sukses/gagal; digest segar setelah mutasi ukuran tetap, pergantian mode, atau deletion; batch 64 vs 65 dan urutan hasil; path invalid, symlink, FIFO, serta direktori non-file. Fixture berada di cache privat app debug, bukan folder game. Build/packaging saja tidak berarti tes dijalankan.
 
-Setelah build debug ARM64 dari bagian persiapan di atas, jalankan suite host Android dan kemas APK instrumentation pada source yang sama:
+Setelah build debug ARM64 dari bagian persiapan di atas, siapkan JVM tes:
+
+Suite Robolectric yang mencakup API 36 memerlukan **JDK 21** (JDK 17 ditolak sebelum tes kelas dijalankan). Setelah build APK dengan JDK 17, ubah JVM untuk tes; CI/release melakukan pergantian yang sama:
+
+```sh
+export JAVA_HOME="/path/to/jdk-21"
+export PATH="$JAVA_HOME/bin:$PATH"
+```
+
 
 ```sh
 ./src-tauri/gen/android/gradlew -p src-tauri/gen/android \
@@ -185,9 +263,19 @@ Pemeriksaan perangkat: simpan dan buka JSON UTF-8; batalkan pemilih dokumen dan 
 
 ## Retensi cache PAK dan batas keselamatan
 
-Cache privat `release-paks` memakai nama `<tag-rilis>-<nama-asset>.pak`. Setelah cache hit terverifikasi atau unduhan dipublikasikan atomik dengan ukuran/SHA-256 benar, sumber regular lama yang cocok dengan validator tag/asset dapat dihapus; sumber saat ini dipertahankan. Metadata, transfer, atau integritas gagal sebelum verifikasi/publikasi tidak mengeviksikan sumber lama. Nama asing, non-UTF-8, symlink, direktori, dan `.part` tidak dihapus.
+Cache privat `release-paks` memakai nama `<tag-rilis>-<nama-asset>.pak`. `release::download` mengembalikan `CachedPak`; caller wajib mempertahankannya hingga instalasi/UID selesai. Handle ini memegang OS file lock `.cache.lock`, sehingga operasi kedua gagal sebelum cleanup, dan kematian proses melepas lock otomatis.
 
-Kegagalan inspeksi/penghapusan cache menghentikan operasi sebelum penulisan game. Eviksi yang sudah selesai tidak dipulihkan bila instalasi berikutnya gagal; rollback game tidak bergantung pada sumber cache lama. Jangan memperlakukan satu sumber yang dipertahankan sebagai batas ukuran seluruh direktori. Jangan mengubah format PAK, mount/signature, jurnal, rollback, IPC, atau akses Root/Shizuku untuk optimasi cache.
+Koreksi regresi Android: Rust 1.97 `std::fs::File::try_lock()` mengembalikan `Unsupported` pada target Android, sehingga tes Linux sebelumnya tidak membuktikan operasi lock pada perangkat. Android dan Linux sekarang berbagi `libc::flock(fd, LOCK_EX | LOCK_NB)`; platform lain tetap memakai API std. `WouldBlock` dilaporkan sebagai kontensi, sedangkan error OS lain ditampilkan sebagai kegagalan lock yang sebenarnya. Tidak ada penghapusan lock atau fallback tanpa lock.
+
+Smoke host dua proses pada jalur produksi memverifikasi penolakan kontensi sebelum cleanup, scratch aktif tetap utuh, lock terlepas setelah proses pemegang dihentikan, serta akuisisi ulang dengan source terverifikasi tetap utuh. [Hasil perangkat](#hasil-qa-perangkat-asli-bertahap) dicatat terpisah dari smoke host. Berkas `.cache.lock` yang tertinggal tidak perlu dihapus karena kepemilikan lock ada pada descriptor/proses, bukan keberadaan nama file.
+
+Setelah metadata rilis valid dan lock eksklusif diperoleh, operasi cache berikutnya membersihkan scratch yatim: regular `.<tag>-<asset>.pak.part-<pid>-<counter>`, regular `uid-pak-<6 alfanumerik>.pak`, dan direktori `uid-work-<6 alfanumerik>` beserta isinya tanpa mengikuti symlink. Prefix/suffix yang tidak cocok, symlink di root cache, file asing, dan direktori lain tidak disentuh. Drop normal tetap membersihkan partial/UID; cleanup sesudah proses mati menunggu operasi cache berikutnya, bukan passive dashboard refresh.
+
+Setelah cache hit terverifikasi atau unduhan dipublikasikan atomik dengan ukuran/SHA-256 benar, source regular lama yang cocok validator tag/asset dapat dihapus; source saat ini dipertahankan. Metadata, transfer, atau integritas gagal sebelum verifikasi/publikasi tidak mengeviksikan source lama. Kegagalan inspeksi/penghapusan cache menghentikan operasi sebelum penulisan game. Eviksi yang sudah selesai tidak dipulihkan bila instalasi berikutnya gagal; rollback game tidak bergantung pada source cache lama.
+
+Derived PAK UID dihapus setelah staging selesai, sebelum penanganan jurnal/commit. Stage, backup dan jurnal milik installer tetap mengikuti pemeriksaan hash/kepemilikan dan recovery; tidak ada perubahan format PAK, mount/signature, IPC, atau akses Root/Shizuku. Satu source tidak membatasi ukuran seluruh direktori; staging UID tetap membutuhkan beberapa salinan.
+
+Cache `app-updates` membersihkan `update.part.apk`, `candidate.json.part`, serta `update.apk` tanpa metadata saat restore pertama. Pemilihan kandidat berbeda yang sudah valid membuang APK/metadata lama; cek gagal/offline mempertahankan kandidat ready. Unduh kandidat ready memverifikasi ulang file tanpa transfer atau partial kedua. File asing tidak dihapus. Cleanup yang gagal dilaporkan, bukan dianggap sukses. Installer batal tetap menyimpan APK untuk retry; versi terpasang yang sudah menyamai kandidat membuang cache saat restore.
 
 `read_text` mengisi satu `ByteArray` sesuai ukuran file yang sudah diperiksa (batas 256 KiB), tanpa scratch buffer atau salinan akhir. Hash mengalokasikan buffer 64 KiB saat diperlukan dan menggunakannya ulang dalam instance service; file kosong/short read, no-follow, identitas file, dan penutupan FD tetap ditangani. Tidak ada polling, retry, telemetry, probe sintetis, atau cache metadata/hash lintas operasi. UID PAK rebuild tetap memakai buffer entry `repak`, bukan constant-memory.
 

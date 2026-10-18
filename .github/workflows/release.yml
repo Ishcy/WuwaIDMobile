@@ -55,6 +55,11 @@ jobs:
         run: |
           export NDK_HOME="$ANDROID_HOME/ndk/27.3.13750724"
           npm run tauri android build -- --apk --target aarch64
+      - name: Set up Java for Robolectric API 36
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
       - name: Run updater behavior tests
         run: |
           export NDK_HOME="$ANDROID_HOME/ndk/27.3.13750724"

@@ -101,13 +101,47 @@ pub fn latest() -> PakResult<Release> {
     })
 }
 
+/// Holds the private-cache lock through installation/UID derivation, not just download.
+/// Dropping the file releases the OS lock, including after process death.
+#[derive(Debug)]
+pub struct CachedPak {
+    path: PathBuf,
+    _lock: File,
+}
+
+impl CachedPak {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+// Rust 1.97's File::try_lock returns Unsupported on Android. Use the kernel
+// lock directly; Linux deliberately shares this path so host tests exercise it.
+#[cfg(any(target_os = "android", target_os = "linux"))]
+fn try_lock_cache(file: &File) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+
+    // SAFETY: the borrowed File keeps its descriptor valid for this call.
+    // flock neither closes nor takes ownership of it; close releases the lock.
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(not(any(target_os = "android", target_os = "linux")))]
+fn try_lock_cache(file: &File) -> io::Result<()> {
+    file.try_lock().map_err(io::Error::from)
+}
+
 /// Download the release into the cache, verifying size and SHA-256 before publishing it.
 /// Retain only this verified source among reserved regular PAKs in the private cache.
 pub fn download(
     release: &Release,
     cache_dir: &Path,
     progress: &ProgressCallback<'_>,
-) -> PakResult<PathBuf> {
+) -> PakResult<CachedPak> {
     let _download = crate::trace::Span::new("download");
     let sha256 = validate_release(release)?;
     let cache_name = format!("{}-{}", release.tag, release.asset_name);
@@ -115,6 +149,21 @@ pub fn download(
 
     fs::create_dir_all(cache_dir)
         .map_err(|_| "Tidak dapat menyiapkan direktori cache patch.".to_owned())?;
+    let lock = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(cache_dir.join(".cache.lock"))
+        .map_err(|_| "Tidak dapat mengunci cache PAK.".to_owned())?;
+    try_lock_cache(&lock).map_err(|error| {
+        if error.kind() == io::ErrorKind::WouldBlock {
+            "Cache PAK sedang digunakan operasi lain.".to_owned()
+        } else {
+            format!("Tidak dapat mengunci cache PAK: {error}")
+        }
+    })?;
+    clean_abandoned_scratch(cache_dir)?;
     emit_progress(progress, 5, "Memeriksa cache patch...");
 
     let cache_check = crate::trace::Span::new("cache.verify");
@@ -124,7 +173,10 @@ pub fn download(
             crate::trace::mark("cache", "hit", release.size);
             retain_verified_source(cache_dir, &cache_path)?;
             emit_progress(progress, 65, "Patch rilis sudah tersedia di cache.");
-            return Ok(cache_path);
+            return Ok(CachedPak {
+                path: cache_path,
+                _lock: lock,
+            });
         }
         Ok(false) => remove_cache_file(&cache_path)?,
         Err(_) => {
@@ -207,7 +259,10 @@ pub fn download(
     retain_verified_source(cache_dir, &cache_path)?;
 
     emit_progress(progress, 65, "Unduhan dan pemeriksaan integritas selesai.");
-    Ok(cache_path)
+    Ok(CachedPak {
+        path: cache_path,
+        _lock: lock,
+    })
 }
 
 /// Parse a GitHub release tag such as `v3.7.1-id.1` into its game version.
@@ -517,14 +572,7 @@ fn retain_verified_source(cache_dir: &Path, retained: &Path) -> PakResult<()> {
         let Some(name) = filename.to_str() else {
             continue;
         };
-        if !name.starts_with('v') || !is_pak_name(name) {
-            continue;
-        }
-        let generated = name.match_indices('-').any(|(separator, _)| {
-            parse_game_version(&name[..separator]).is_ok()
-                && validate_asset_name(&name[separator + 1..]).is_ok()
-        });
-        if !generated {
+        if !is_source_name(name) {
             continue;
         }
         let kind = match entry.file_type() {
@@ -546,6 +594,67 @@ fn retain_verified_source(cache_dir: &Path, retained: &Path) -> PakResult<()> {
         }
     }
     Ok(())
+}
+
+fn is_source_name(name: &str) -> bool {
+    name.starts_with('v')
+        && is_pak_name(name)
+        && name.match_indices('-').any(|(separator, _)| {
+            parse_game_version(&name[..separator]).is_ok()
+                && validate_asset_name(&name[separator + 1..]).is_ok()
+        })
+}
+
+// All native users keep CachedPak alive until the installer finishes. Under its
+// exclusive lock, these generated scratch names cannot belong to an active operation.
+// Never inspect game storage, source PAKs, foreign names, or follow symlinks.
+fn clean_abandoned_scratch(cache_dir: &Path) -> PakResult<()> {
+    let entries = fs::read_dir(cache_dir)
+        .map_err(|_| "Tidak dapat memeriksa berkas sementara PAK.".to_owned())?;
+    for entry in entries {
+        let entry = entry.map_err(|_| "Tidak dapat membaca berkas sementara PAK.".to_owned())?;
+        let filename = entry.file_name();
+        let Some(name) = filename.to_str() else {
+            continue;
+        };
+        let uid_work = generated_suffix(name, "uid-work-", "");
+        let uid_pak = generated_suffix(name, "uid-pak-", ".pak");
+        let partial = name
+            .strip_prefix('.')
+            .and_then(|s| s.rsplit_once(".part-"))
+            .is_some_and(|(source, suffix)| {
+                is_source_name(source)
+                    && suffix.split_once('-').is_some_and(|(pid, counter)| {
+                        !pid.is_empty()
+                            && pid.bytes().all(|b| b.is_ascii_digit())
+                            && !counter.is_empty()
+                            && counter.bytes().all(|b| b.is_ascii_digit())
+                    })
+            });
+        if !uid_work && !uid_pak && !partial {
+            continue;
+        }
+        let kind = entry
+            .file_type()
+            .map_err(|_| "Tidak dapat memeriksa tipe berkas sementara PAK.".to_owned())?;
+        let result = if uid_work && kind.is_dir() {
+            fs::remove_dir_all(entry.path())
+        } else if (uid_pak || partial) && kind.is_file() {
+            fs::remove_file(entry.path())
+        } else {
+            continue;
+        };
+        result.map_err(|_| {
+            "Tidak dapat membersihkan berkas sementara PAK; berkas game belum diubah.".to_owned()
+        })?;
+    }
+    Ok(())
+}
+
+fn generated_suffix(name: &str, prefix: &str, suffix: &str) -> bool {
+    name.strip_prefix(prefix)
+        .and_then(|s| s.strip_suffix(suffix))
+        .is_some_and(|s| s.len() == 6 && s.bytes().all(|b| b.is_ascii_alphanumeric()))
 }
 
 fn emit_progress(callback: &ProgressCallback<'_>, percent: u8, label: &str) {
@@ -675,8 +784,8 @@ mod tests {
         let cache = root.path().join(format!("{}-{}", release.tag, release.asset_name));
         fs::write(&cache, bytes).unwrap();
         let path = super::download(&release, root.path(), &|_| {}).unwrap();
-        assert_eq!(path, cache);
-        assert_eq!(fs::read(&path).unwrap(), bytes);
+        assert_eq!(path.path(), cache);
+        assert_eq!(fs::read(path.path()).unwrap(), bytes);
     }
 
     #[test]
@@ -708,7 +817,7 @@ mod tests {
         assert!(super::download(&invalid, root.path(), &|_| {}).is_err());
         assert_eq!(fs::read(&old).unwrap(), b"previous source");
         assert_eq!(
-            super::download(&release, root.path(), &|_| {}).unwrap(),
+            super::download(&release, root.path(), &|_| {}).unwrap().path(),
             current
         );
         assert_eq!(fs::read(&current).unwrap(), bytes);
@@ -721,6 +830,65 @@ mod tests {
         );
         #[cfg(unix)]
         assert_eq!(fs::read_link(link).unwrap(), foreign);
+    }
+
+    #[test]
+    fn next_operation_reclaims_crash_scratch_without_touching_sources_or_foreign_paths() {
+        let root = tempfile::tempdir().unwrap();
+        let bytes = b"verified source";
+        let release = release_fixture(bytes);
+        let current = root.path().join(format!("{}-{}", release.tag, release.asset_name));
+        fs::write(&current, bytes).unwrap();
+        let partial = root.path().join(".v3.6.0-id.1-translation.pak.part-123-0");
+        let derived = root.path().join("uid-pak-Ab3dE6.pak");
+        let work = root.path().join("uid-work-Xy7zA1");
+        fs::write(&partial, [0; 65536]).unwrap();
+        fs::write(&derived, [0; 65536]).unwrap();
+        fs::create_dir(&work).unwrap();
+        fs::write(work.join("uid.db"), [0; 8192]).unwrap();
+        let foreign = root.path().join("uid-pak-not-generated.pak");
+        let foreign_directory = root.path().join("uid-work-not-generated");
+        fs::write(&foreign, b"keep").unwrap();
+        fs::create_dir(&foreign_directory).unwrap();
+        #[cfg(unix)]
+        let link = {
+            let link = root.path().join("uid-work-Abc123");
+            std::os::unix::fs::symlink(&foreign_directory, &link).unwrap();
+            std::os::unix::fs::symlink(&foreign, work.join("foreign-link")).unwrap();
+            link
+        };
+        super::download(&release, root.path(), &|_| {}).unwrap();
+        assert!(!partial.exists());
+        assert!(!derived.exists());
+        assert!(!work.exists());
+        assert_eq!(fs::read(&current).unwrap(), bytes);
+        assert_eq!(fs::read(&foreign).unwrap(), b"keep");
+        assert!(foreign_directory.is_dir());
+        #[cfg(unix)]
+        assert_eq!(fs::read_link(link).unwrap(), foreign_directory);
+    }
+
+    #[test]
+    fn cache_lease_protects_live_scratch_until_the_installer_releases_it() {
+        let root = tempfile::tempdir().unwrap();
+        let bytes = b"verified source";
+        let release = release_fixture(bytes);
+        fs::write(
+            root.path()
+                .join(format!("{}-{}", release.tag, release.asset_name)),
+            bytes,
+        )
+        .unwrap();
+        let lease = super::download(&release, root.path(), &|_| {}).unwrap();
+        let active = root.path().join("uid-pak-Ab3dE6.pak");
+        fs::write(&active, b"live UID payload").unwrap();
+        assert!(super::download(&release, root.path(), &|_| {}).is_err());
+        assert_eq!(fs::read(&active).unwrap(), b"live UID payload");
+        assert_eq!(fs::read(lease.path()).unwrap(), bytes);
+        drop(lease);
+        let next = super::download(&release, root.path(), &|_| {}).unwrap();
+        assert!(!active.exists());
+        assert_eq!(fs::read(next.path()).unwrap(), bytes);
     }
 
     #[test]

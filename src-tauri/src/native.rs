@@ -372,7 +372,7 @@ pub async fn wuwa_run(
                                 &*storage,
                                 &layout,
                                 &release,
-                                &pak,
+                                pak.path(),
                                 custom_uid.as_deref(),
                                 &progress,
                             )?
@@ -381,7 +381,7 @@ pub async fn wuwa_run(
                                 &*storage,
                                 &layout,
                                 &release,
-                                &pak,
+                                pak.path(),
                                 custom_uid.as_deref(),
                                 &progress,
                             )?

@@ -170,6 +170,65 @@ class AppUpdateRepositoryTest {
         assertFalse(current.getBoolean("ready"))
     }
 
+    @Test fun restartRemovesInterruptedDownloadsAndOrphanApkWithoutTouchingForeignCache() {
+        val directory = repository.apk.parentFile!!
+        directory.mkdirs()
+        val partial = File(directory, "update.part.apk").apply { writeBytes(ByteArray(65536)) }
+        val metadataPartial = File(directory, "candidate.json.part").apply { writeText("{}") }
+        repository.apk.writeBytes(ByteArray(65536))
+        val foreign = File(directory, "keep.txt").apply { writeText("keep") }
+        assertFalse(fixture.repository(activity).snapshot().getBoolean("ready"))
+        assertFalse(partial.exists())
+        assertFalse(metadataPartial.exists())
+        assertFalse(repository.apk.exists())
+        assertEquals("keep", foreign.readText())
+    }
+
+    @Test fun selectingNewCandidateEvictsSupersededApkButFailedCheckKeepsReadyCache() {
+        ready()
+        fixture.server.enqueue(MockResponse().setResponseCode(500))
+        assertThrows(Exception::class.java) { repository.check() }
+        assertTrue(repository.verifyReady().isFile)
+        val newer = fixture.apk(version = "0.4.2", code = 10)
+        fixture.enqueueRelease(fixture.release(newer, version = "0.4.2"))
+        val selected = repository.check()
+        assertEquals("0.4.2", selected.getString("availableVersion"))
+        assertFalse(selected.getBoolean("ready"))
+        assertFalse(repository.apk.exists())
+        assertFalse(File(repository.apk.parentFile, "candidate.json").exists())
+    }
+
+    @Test fun downloadingReadyCandidateReverifiesCacheWithoutAnotherTransferOrPartial() {
+        val source = ready()
+        val requests = fixture.server.requestCount
+        val progress = mutableListOf<Int>()
+        assertTrue(repository.download { percent, _ ->
+            progress += percent
+            assertFalse(File(repository.apk.parentFile, "update.part.apk").exists())
+        }.getBoolean("ready"))
+        assertEquals(requests, fixture.server.requestCount)
+        assertEquals(100, progress.last())
+        assertArrayEquals(source.readBytes(), repository.verifyReady().readBytes())
+    }
+
+    @Test fun readyCacheSurvivesRestartCleanupButTamperedReuseCannotSkipVerification() {
+        val source = ready()
+        val partial = File(repository.apk.parentFile, "update.part.apk").apply { writeBytes(ByteArray(65536)) }
+        val metadataPartial = File(repository.apk.parentFile, "candidate.json.part").apply { writeText("{}") }
+        val restored = fixture.repository(activity)
+        assertTrue(restored.snapshot().getBoolean("ready"))
+        assertFalse(partial.exists())
+        assertFalse(metadataPartial.exists())
+        assertArrayEquals(source.readBytes(), restored.verifyReady().readBytes())
+        restored.apk.setWritable(true)
+        restored.apk.writeBytes(fixture.tampered(source).readBytes())
+        val requests = fixture.server.requestCount
+        assertThrows(Exception::class.java) { restored.download { _, _ -> } }
+        assertEquals(requests, fixture.server.requestCount)
+        assertFalse(restored.apk.exists())
+        assertFalse(restored.snapshot().getBoolean("ready"))
+    }
+
     @Test fun missingStableReleaseRetainsAnAlreadyVerifiedOfflineCandidate() {
         ready()
         fixture.server.enqueue(MockResponse().setResponseCode(404))

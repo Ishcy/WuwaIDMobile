@@ -23,6 +23,8 @@ internal class AppUpdateRepository(
   private val directory = File(activity.cacheDir, "app-updates")
   val apk = File(directory, "update.apk")
   private val metadata = File(directory, "candidate.json")
+  private val partial = File(directory, "update.part.apk")
+  private val metadataPartial = File(directory, "candidate.json.part")
   private var restored = false
   private var candidate: JSONObject? = null
   private var cachedDigest: String? = null
@@ -73,8 +75,13 @@ internal class AppUpdateRepository(
 
   private fun restore() {
     if (restored) return
+    cleanPartials()
+    if (!metadata.isFile) {
+      remove(apk)
+      restored = true
+      return
+    }
     restored = true
-    if (!metadata.isFile) return
     try {
       require(metadata.length() in 1..8192) { "Metadata cache updater tidak valid." }
       val release = JSONObject(metadata.readText())
@@ -140,6 +147,10 @@ internal class AppUpdateRepository(
       .put("name", name).put("url", url).put("size", asset.getLong("size"))
       .put("sha256", hash.lowercase())
     validate(selected)
+    // A successfully selected different release supersedes the old cached APK.
+    // Failed/offline checks never reach this point, preserving the ready candidate.
+    if (cachedDigest != selected.getString("sha256") || candidate?.optString("tag") != tag ||
+      candidate?.optLong("size") != selected.getLong("size")) clearCache()
     candidate = selected
     notice = "Pembaruan aplikasi ${selected.getString("version")} tersedia."
     return snapshot()
@@ -161,11 +172,13 @@ internal class AppUpdateRepository(
     restore()
     val release = candidate ?: throw IllegalStateException("Periksa pembaruan sebelum mengunduh APK.")
     validate(release)
+    if (cachedDigest == release.getString("sha256") && apk.isFile) {
+      verifyReady()
+      progress(100, "APK update terverifikasi sudah tersedia di cache.")
+      return snapshot()
+    }
     check(directory.isDirectory || directory.mkdirs()) { "Tidak dapat menyiapkan cache update." }
-    val partial = File(directory, "update.part.apk")
-    val metadataPartial = File(directory, "candidate.json.part")
-    check(!partial.exists() || partial.delete()) { "Tidak dapat membersihkan unduhan APK yang terputus." }
-    check(!metadataPartial.exists() || metadataPartial.delete()) { "Tidak dapat membersihkan metadata update yang terputus." }
+    cleanPartials()
     try {
       val connection = open(release.getString("url"))!!
       val expected = release.getLong("size")
@@ -214,8 +227,7 @@ internal class AppUpdateRepository(
       progress(100, "APK update siap dipasang.")
       return snapshot()
     } finally {
-      partial.delete()
-      metadataPartial.delete()
+      cleanPartials()
     }
   }
 
@@ -228,8 +240,8 @@ internal class AppUpdateRepository(
       verifyApk(release, apk)
     } catch (error: Exception) {
       cachedDigest = null
-      apk.delete()
-      metadata.delete()
+      remove(apk)
+      remove(metadata)
       throw IllegalStateException("APK cache tidak lolos verifikasi: ${error.message}. Unduh ulang APK update.")
     }
     return apk
@@ -285,8 +297,18 @@ internal class AppUpdateRepository(
   private fun clearCache() {
     candidate = null
     cachedDigest = null
-    apk.delete()
-    metadata.delete()
+    remove(apk)
+    remove(metadata)
+    cleanPartials()
+  }
+
+  private fun remove(file: File) {
+    check(!file.exists() || file.delete()) { "Tidak dapat membersihkan cache update ${file.name}." }
+  }
+
+  private fun cleanPartials() {
+    remove(partial)
+    remove(metadataPartial)
   }
 
   private fun text(url: String, limit: Int, allowMissing: Boolean = false): String? {

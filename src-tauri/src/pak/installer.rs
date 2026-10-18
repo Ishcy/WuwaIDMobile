@@ -661,6 +661,9 @@ fn install_current(
         }
         Ok(())
     })();
+    // Release private UID scratch before journal handling. Recovery uses only
+    // the verified game stages/backups; it never needs this derived cache copy.
+    drop(derived);
     if let Err(error) = stage_result {
         let cleanup = clean_stages(storage, &stages, &staged_hashes);
         return Err(append_cleanup_error(error, cleanup));
