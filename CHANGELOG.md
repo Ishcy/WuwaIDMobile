@@ -2,233 +2,41 @@
 
 ## Unreleased
 
-- Optimize APK resource usage (WM-29): reduce ARM64 debug APK size from
-  479,265,253 to 120,178,389 bytes with limited Rust debug information and fresh
-  debug-only ZIP packaging; leave the release profile, existing release APK and
-  signing material unchanged.
-  Avoid duplicate metadata buffers and eagerly allocated hash scratch space.
-  Reuse a report-scoped redaction pattern without retaining secrets between
-  calls. Retain one verified release source in the private PAK cache while
-  preserving foreign files, staging, directories and symlinks; prune only after
-  source verification, before game writes. Bump Shizuku UserService to version 4
-  so APK upgrades recreate the changed storage implementation.
-  Verify 133 host tests, browser export and real backend cache smoke; package
-  eight existing device cases without running them. Document the debug-detail
-  tradeoff and user-only device/performance checks without claiming Android
-  RSS, CPU or battery gains from host measurements.
-
-- Mature diagnostics and Android export (WM-28): add a versioned, redacted JSON
-  report with application/device metadata, independent partial-failure sections
-  and explicit not-checked states. Keep the latest 20 session errors with bounded,
-  idempotently redacted messages. Replace blob-only Android export with native
-  document saving and read-only JSON sharing; distinguish saved/cancelled/failed
-  and chooser-opened outcomes without claiming recipient delivery. Fix redaction
-  of valid UIDs beginning with `[REDACTED]` while preserving existing markers.
-  Verify 131 host tests, Chromium export smoke and the ARM64 debug APK build.
-  Record the user's successful physical-device test on the pre-review APK;
-  the reviewed APK is locally verified without repeating device tests. Release
-  APK and signing material are unchanged.
-
-- Expand current-state regression coverage (WM-27) with 31 frontend, 9 Rust and
-  7 Android host tests for access/readiness, UID and maintenance gates, verified
-  PAK cache reuse, unsafe metadata, staging cleanup, collisions, fresh hashes,
-  first-install rollback and privileged storage boundaries. All 108 host tests
-  pass, alongside real browser UI and local PAK-engine CLI smoke. Prepare six
-  additional Android instrumentation cases (eight total), compile and package
-  their APK against the current ARM64 debug build, and document user-only device
-  execution. Device tests are not reported as passed; production behavior and the
-  accepted release APK remain unchanged.
-  Keep cache regression assertions focused on verified paths and bytes rather
-  than filesystem modification timestamps.
-
-- Add the Android application updater (WM-26), separate from translation PAK
-  releases: check stable WuwaIDMobile releases on startup or manually, show an
-  in-app update banner, stream and verify APK downloads with progress, then open
-  the Android installer with explicit user confirmation. Handle unknown-source
-  permission return, cancellation, interrupted downloads and verified cache
-  reuse without root/Shizuku or game-file mutation. Enforce release identity,
-  higher versionCode, pinned signer, supported minSdk/ARM64, bounded HTTPS hosts
-  and size/SHA-256 checks. Narrow FileProvider to the updater cache. Disable
-  release updates on debug/browser/desktop builds; retain UID focus during
-  background check completion. Publish QA-approved 0.x releases as stable so
-  the updater can discover them. The user subsequently reported device testing
-  safe and accepted the candidate for commit; detailed scenario coverage was not
-  supplied.
-- Add WM-26 behavior coverage: 27 Kotlin/Robolectric cases with locally served
-  TLS downloads and SDK-built, ephemeral-key-signed APKs; 10 type-checked DOM/UI
-  cases; CI and release execution. Exercise cache integrity, unsafe metadata,
-  APK identity/signatures, permissions, cancellation and lifecycle. Fix the
-  Android 9 archive parser rejecting valid APKs by requesting GET_SIGNATURES
-  alongside GET_SIGNING_CERTIFICATES. Preserve the failing-before/passing-after
-  regression. Browser smoke and 24 existing Rust tests pass; the assistant did
-  not run the real Android installer or game tests. Device acceptance is recorded
-  from the user's report, separately from host-test evidence.
-
-- Fix the launcher icon appearing over-zoomed on the user's device. Use a separate
-  Android foreground SVG with centered 72×72 artwork inside the 108×108 adaptive
-  canvas, preserving transparent padding through icon regeneration. Enlarge the
-  initial 66×66 correction by about 9% after user feedback about white borders.
-  Keep original desktop/legacy artwork and app identity unchanged. Verify padded
-  foregrounds in all five densities inside the signed APK and inspect simulated
-  masks. The user accepted the final framing after a successful device update.
-
-- Restore the display name **WuwaID Mobile** in Tauri and Android app/activity
-  labels. Replace template icons with the pinned WuwaIDLauncher artwork, regenerate
-  desktop and Android legacy/adaptive icons, and remove unused default drawables.
-  Keep package/version/signing identity unchanged. Build a new signed ARM64 APK;
-  verify final labels, all five-density launcher/foreground image pixels, original
-  certificate, v2 signing and 16 KiB alignment. Record the user's device acceptance
-  for the latest branding APK separately from the preceding WM-25 candidate.
-
-- Preserve the published Android release identity for the Tauri rebuild:
-  version 0.4.0 / versionCode 8, original package and pinned release certificate.
-  Restore original-keystore signing inputs and reject incompatible release signing.
-  Isolate debug APKs with `.debug`; require explicit manual upgrade acceptance and
-  APK identity/certificate verification in the signed release workflow.
-- Detect pre-Tauri `wuwaindonesia` installations without mutating during refresh.
-  Add explicit offline migration using pinned historical release SHA-256/size,
-  exact mount/SHA-1 verification and the existing transaction engine. Retain old
-  sources until the new owned set commits; journal hash-checked resumable cleanup.
-  Refuse ambiguous layouts, unknown payloads and orphan legacy transaction files.
-  Remove verified inactive-resource sets and uninstall owned sets across resources.
-- Restore Galaxy Store game discovery, storage routing and launch/force-stop,
-  preserve Global-first materialized selection, and freeze the selected package
-  for the app session across Root/Shizuku switches.
-- Compile frontend, Rust (including existing test targets without execution),
-  Kotlin/AIDL and debug ARM64 APK; inspect all seven historical published APK
-  identities/certificates and verify debug APK v2 signing and 16 KiB alignment.
-  Build a release ARM64 upgrade candidate with the original keystore subsequently
-  supplied by the user; verify final package/version, the original certificate,
-  v2 signing and 16 KiB alignment. No assistant tests were run for that WM-25 handoff.
-  The user reported successful release APK installation and completed device QA
-  with safe, correct operation; WM-25 is accepted on that confirmation. No
-  exhaustive scenario coverage, pre-upgrade version, official-file hash comparison
-  or quantitative measurements were supplied. No runtime changes after acceptance.
-
-- Support direct root access through an explicit `su` permission request and a
-  non-daemon libsu 6.0.0 Binder service, without requiring Shizuku.
-  Reuse the guarded storage engine, PFD streaming, ownership, and transactions.
-- Add persistent Root/Shizuku selection in maintenance and selected-access
-  readiness across install, UID, repair, uninstall, and diagnostics.
-  Passive refresh never requests root; service loss fails without automatic
-  reconnect or transport fallback. Release pending binds on lifecycle teardown.
-- Verify 24 Rust tests including selected-access transitions and game/resource
-  gates, eight host-adapted root lifecycle cases, and root-only browser
-  Apply/Reset/removal/switching. Build the ARM64 debug APK and verify its
-  v2 signature and 16 KiB alignment. The user completed actual-device testing
-  and reported safe, correct operation; no quantitative device measurements
-  or exhaustive scenario/hash evidence were supplied.
-
-- Read root probes, directory listings, batched stat metadata, bounded text, and
-  streaming hashes directly inside the privileged Shizuku UserService (API 24+).
-  Remove their shell scripts, input pipes, and per-request threads; keep mutation
-  allowlists, path/symlink guards, ownership, journals, rollback, and recovery.
-- Return SHA-256, optional SHA-1, and size from the same verified file stream.
-  Batch/deduplicate lifecycle inspection, avoid discarded recovery inspections,
-  and remove overlapping committed-state checks without cross-operation caches.
-- Close every privileged read/hash descriptor explicitly with `Os.close` in
-  `finally`, including rejected reads. Android's borrowed-descriptor
-  `FileInputStream` does not own or close caller FDs; retain regression coverage.
-- Add native-gated debug phase/correlation markers across frontend busy state,
-  permission dialog, service binding, storage, network/cache, UID, and transactions.
-  Release builds do not record UID text, payloads, paths, or debug timings.
-- Verify real-release host install, UID replacement, Reset, tamper refusal,
-  repair/uninstall, Linux-syscall Kotlin metadata safety, and browser busy/idle.
-  Actual-device performance/game verification remains with the user.
-
-- Reuse the installer's verified terminal state for successful-operation
-  dashboards instead of repeating resource discovery and full PAK inspection;
-  keep fresh permission probes, explicit refresh/diagnostics, and next preflight.
-- Reuse two Shizuku output workers and per-worker 64 KiB read buffers, serialize
-  process execution to prevent paired-reader starvation, and shrink initial
-  metadata buffers without changing output limits or storage guards.
-- Share the blocking GitHub HTTP client/connection pool without caching release
-  metadata or weakening redirect, timeout, size, or digest validation.
-- Optimize the dev profile at level 2 for CPU-heavy PAK hashing/repacking in
-  debug APKs while retaining debug symbols, assertions, and overflow checks.
-  With the same real-release host fixture, debug install drops from 21.283s to
-  0.560s and UID Apply from 33.318s to 1.019s; these are not device timings.
-- Profile frontend, indexed UID SQLite, and the real 52,871,888-byte release PAK.
-  Host smoke verifies UID/Reset/tamper detection and streaming/concurrent storage;
-  real HTTPS smoke verifies latest, cache integrity and corrupted-cache re-download.
-  Device performance tests remain exclusively with the user.
-
-- Fix pending Shizuku permission requests hanging when the server binder dies;
-  invalidate cached user-service sessions and wake blocked binds on lifecycle loss.
-- Isolate callbacks per bind attempt so stale connection/disconnection events
-  cannot replace a newer session; clean failed, timed-out, and destroyed sessions.
-- Require Shizuku server API 12+, handle permission rationale with actionable
-  guidance, and replace API-26 cache symlink checks with API-21 `Os.lstat`.
-- Verify Kotlin bridge behavior using a host-adapted process/pipe smoke,
-  Android APK build/signature, packaged provider manifest, and 20 Rust tests.
-  Bridge `NewApi` lint errors are resolved; existing TV manifest lint errors remain.
-  Real-device Shizuku/Binder/SELinux verification was unavailable without ADB.
-
-- Remove the installation safety copy and custom UID preview, including its
-  update handlers and unused styles; keep a single-column UID editor.
-- Allow custom UID Apply before a manual translation install: reuse the verified
-  release/cache and transactional installer to install translation plus UID in
-  one operation. Keep device, permission, release, resource, and recovery gates.
-  Align browser simulation with the native fresh-install transition.
-- Verify fresh/already-installed Apply and Reset in browser and a disk-backed
-  PAK v12/SQLite smoke fixture; build and signature-check the ARM64 debug APK.
-  No connected ADB device was available to repeat Android gameplay verification.
-
-- Implement native Android custom UID and Reset using verified release PAKs,
-  SQLite updates to the three launcher UID targets, and verified PAK v12 repacking.
-  Preserve other translations, original release integrity, and official game files.
-- Track source/derived hashes and UID selection in transactional ownership metadata;
-  retain selections on repair/reinstall and restore previous selections on rollback.
-  Reuse the existing Shizuku bridge without changing account/server UID.
-- Enable the native UID editor and keep browser/native validation aligned with
-  the 32-unit UTF-16 input limit; reject blank and control-character input.
-- Verify native Apply and Reset in Android gameplay on SM-A525F: exact
-  `Rover Indonesia` HUD text, restored original UID/release PAK, and identical
-  SHA-256 checksums for all 443 baseline official resource files.
-
-- Add restrained 140–180 ms navigation, control, theme, disclosure, dialog,
-  and toast transitions; interpolate accessible progress without layout reflow.
-  Honor live reduced-motion preferences and avoid replaying page entrances on
-  status/progress updates.
-
-- Simplify all three screens: remove promotional copy, decorative artwork,
-  numbered labels, and repeated notices; use concise status/action text and
-  collapsible technical details. Remove the package detail section from Beranda.
-  Preserve themes and operation controls.
-
-- Reimagine the frontend as an original ink/lavender editorial workspace with
-  custom resonance artwork, horizontal desktop navigation, a mobile dock,
-  a UID studio, and a maintenance control center; no reference APK UI/assets.
-- Add persistent light, dark, and system themes with pre-paint initialization,
-  live system preference tracking, and themed dialogs, forms, and notifications.
-- Keep navigation/theme controls stable during operations and update progress
-  in place so interaction and keyboard focus are not discarded by progress events.
-
-- Fix Resource Mount entries to use extensionless PAK base paths, matching the
-  launcher and Android bytecode rather than physical filenames.
-- Mark old owned descriptors unhealthy and allow transactional repair or safe
-  uninstall; preserve previous snapshots on failed format migration.
-- Replace the descriptor wording assertion with file-resolution/hash checks and
-  add previous-format migration, removal, rollback and unknown-format regression coverage.
-
-- Add latest stable WuwaID GitHub release discovery and streaming PAK downloads
-  with size/SHA-256 verification and re-verified private cache.
-- Implement Android Shizuku UserService/AIDL storage access and PFD streaming,
-  restricting writes to owned paths inside numeric game-resource versions.
-- Add resource/signature discovery, separate priority-99 mounts, ownership
-  metadata, transactional install/repair/uninstall, and exact snapshot recovery
-  across resource updates without requiring release metadata.
-- Use native Tauri IPC and progress events in the shell; retain browser-only
-  simulation and custom UID actions, with explicit desktop platform limits.
-
-- Build the Indonesian Beranda, Kustomisasi, and Perawatan frontend with responsive
-  desktop/sidebar and mobile/bottom navigation.
-- Add explicitly simulated Tauri IPC for device scenarios, translation install and
-  repair, permission flow, custom UID display, and JSON diagnostics; persist mock state.
-- Replace font customization with custom UID input, apply/restore
-  actions, and persisted display state without changing the account UID.
-- Add operation progress and gating, and uninstall confirmation with UID restoration.
-- Remove the unused greeting form and Rust greeting command.
-
-- Replace the previous Android launcher with a minimal Tauri 2 desktop/Android shell.
-- Add GitHub CI for frontend, Rust, and Android debug APK builds.
+- **WM-29 — APK size:** reduce the ARM64 debug APK from 479,265,253 to 120,178,389 bytes (−74.9%) with smaller Rust debug information and fresh debug-only ZIP packaging. Reduce metadata, hash, and redaction allocations; retain one verified release PAK, pruning the old source only after verification and before game writes. Preserve foreign files, staging, directories, and symlinks. Bump Shizuku UserService to v4. Release profile/signing are unchanged; host measurements do not establish Android CPU, RSS, or battery gains.
+- **WM-28 — Diagnostics/export:** add schema-v1 redacted JSON with app/device metadata, independent partial sections, and explicit unchecked states. Retain 20 bounded session errors with idempotent redaction, including UIDs beginning `[REDACTED]`. Android save distinguishes saved/cancelled/failed; share reports chooser-opened, not delivery. The user tested the pre-review APK; the reviewed APK was not retested. Release signing is unchanged.
+- **WM-27 — Regression coverage:** add 47 host tests (31 frontend, 9 Rust, 7 Android) for access/readiness, UID and maintenance gates, PAK cache integrity, staging, collisions, rollback, and privileged storage boundaries. The suite totals 108 host tests; eight Android instrumentation tests were packaged but not run on-device. Production behavior and the accepted release APK are unchanged.
+- **WM-26 — App updater:** check stable WuwaIDMobile releases at startup or on request, show an in-app banner, stream/verify APK downloads, then require Android installer confirmation. Handle permission return, cancellation, interrupted downloads, and verified-cache reuse without root/Shizuku or game-file mutation. Verify release identity, increasing versionCode, signer, minSdk, ARM64, HTTPS hosts, size, and SHA-256; restrict FileProvider to updater cache. Disable release updates in debug/browser/desktop. QA-approved 0.x releases are stable; the user reported safe device testing, without detailed scenario coverage.
+- **WM-26 — Updater tests:** add 27 Kotlin/Robolectric tests with local TLS and temporary APKs, 10 type-checked UI tests, and CI/release execution. Fix Android 9 APK parsing by requesting `GET_SIGNATURES` with `GET_SIGNING_CERTIFICATES`; retain the regression test. Browser smoke is not Android installer/game evidence.
+- **Launcher icon:** center 72×72 adaptive artwork with 18-pixel padding in a 108×108 canvas; preserve desktop/legacy art and app identity. The user accepted the final framing on-device.
+- **Branding:** restore **WuwaID Mobile**, use pinned WuwaIDLauncher artwork, regenerate desktop/Android icons, and remove unused drawables. Preserve package, version, and signing identity; the user accepted the update.
+- **WM-25 — Release identity:** retain `0.4.0` / versionCode `8`, package `com.titotfp.wuwaid`, and the original certificate. Require the original keystore; reject incompatible signing/version codes. Use `.debug` for debug APKs and verify identity/certificate in release workflows. The user reported a safe in-place upgrade; exhaustive coverage was not supplied.
+- **Pre-Tauri migration:** detect legacy `wuwaindonesia` installs without refresh-time mutation. Migrate offline only when historical PAK SHA-256/size, signature, and mount/SHA-1 match. Preserve old sources until the transactional new set commits; journal hash-checked cleanup. Reject ambiguous layouts, unknown files, and orphan transactions; remove verified inactive/owned sets safely.
+- **Galaxy Store:** restore discovery, storage routing, launch/force-stop, and selection. Prefer a materialized Global resource, then Galaxy Store, then the first installed package; freeze selection for the app session.
+- **WM-24 — Root access:** add explicit `su` permission and a non-daemon libsu 6.0.0 Binder service. Verify UID 0 before exposing Binder; reuse guarded storage, PFD streaming, ownership, and transactions without requiring Shizuku.
+- **Access selection:** persist Root/Shizuku choice and use its grant for install, UID, repair, uninstall, and diagnostics. Passive refresh never requests root; block switching during operations. Service loss does not auto-reconnect or silently change transport; release pending binds on teardown.
+- **Root device acceptance:** the user reported safe operation; no quantitative performance or exhaustive scenario results were supplied.
+- **Shizuku storage:** perform probes, listings, batched stat, bounded text reads, and streaming hashes in the privileged UserService (API 24+), removing shell scripts, input pipes, and per-request threads. Keep mutation/path guards, ownership, journals, rollback, and recovery.
+- **Shared file hashing:** return SHA-256, optional SHA-1, and size from one verified stream. Batch/deduplicate lifecycle inspection without cross-operation caches.
+- **Descriptor ownership:** close privileged read/hash descriptors with `Os.close` in `finally`, including rejected reads; Android's borrowed-descriptor `FileInputStream` does not own caller FDs.
+- **Native debug tracing:** gate phase/correlation markers across UI, permissions, service, storage, network/cache, UID, and transactions. Release builds record no UID text, payloads, paths, or debug timings.
+- **WM-22 — Verified installer state:** reuse the installer's verified terminal state for success dashboards; keep fresh permission probes, explicit refresh/diagnostics, and the next operation's preflight.
+- **Shizuku workers:** reuse two output workers with 64 KiB buffers; serialize processes to avoid reader starvation. Reduce initial metadata buffers from 8 KiB to 256 bytes without changing limits or storage guards.
+- **HTTP reuse:** share the blocking GitHub client/connection pool without caching release metadata or weakening redirect, timeout, size, or digest checks.
+- **Debug PAK performance:** set Cargo `dev` `opt-level = 2`, retaining symbols, assertions, and overflow checks. In the same host fixture, install fell from 21.283 s to 0.560 s and UID Apply from 33.318 s to 1.019 s; these are not device timings.
+- **Performance checks:** profile indexed UID SQLite and a 52,871,888-byte release PAK. Host smoke covers UID/Reset/tamper detection, streaming/concurrency, and HTTPS cache integrity; device performance remains user-only.
+- **WM-21 — Shizuku lifecycle:** reject pending permission requests on binder death; invalidate stale sessions and wake blocked binds. Isolate callbacks by bind attempt; clean failed, timed-out, or destroyed sessions. Require API 12+, explain permission rationale, and use API-21 `Os.lstat` for cache symlink checks.
+- **UID editor:** remove the safety-copy and preview; keep a single-column editor. Allow Apply before manual installation using the verified release/cache and transaction, while preserving device, permission, release, resource, and recovery gates. Match the browser simulation to native behavior.
+- **Native custom UID:** update `MultiText.Content` in `Client/Content/Aki/ConfigDB/en/lang_multi_text.db` for `Text_FriendMyUid_Text`, `Text_UserId_Text`, and `PrefabTextItem_1341587207_Text` (one row each), then verify and repack PAK v12. Preserve other translations, official files, and account UID; store source/derived hashes and selection transactionally. Enforce the 32-unit UTF-16 limit; reject blank/control input. Reset restores the original PAK. On SM-A525F, `Rover Indonesia` appeared in-game; Reset restored the original UID/PAK and all 443 official resource-file hashes matched.
+- Add 140–180 ms navigation/control/theme/dialog/toast transitions; keep progress in-place and honor live reduced-motion changes without replaying page animations on status updates.
+- Simplify the three screens: remove promotional copy, artwork, numbered labels, and repeated notices; use concise status/actions and collapsible technical details while preserving themes and controls.
+- Redesign the UI as an original ink/lavender workspace with desktop navigation, mobile dock, UID studio, and maintenance center; do not copy reference APK UI/assets.
+- Add persistent light/dark/system themes, pre-paint initialization, live system tracking, and themed dialogs/forms/notifications.
+- Keep navigation/theme controls stable during operations so progress updates preserve focus and interaction.
+- **Resource Mount:** use extensionless PAK base paths. Mark old owned descriptors unhealthy; support transactional repair/uninstall and preserve snapshots on failed migration.
+- **Translation installer:** discover stable WuwaID releases; stream and verify downloads by size/SHA-256 and re-verify cache. Add Shizuku UserService/AIDL with PFD streaming, restrict writes to owned paths in numeric resource versions, and support signatures, priority-99 mounts, ownership, transactions, and recovery across resource updates.
+- Use native Tauri IPC/progress events; keep browser-only simulation and custom UID actions, with explicit desktop platform limits.
+- Build Indonesian Beranda, Kustomisasi, and Perawatan screens with responsive desktop/sidebar and mobile/bottom navigation.
+- Add simulated browser IPC for device scenarios, install/repair, permissions, UID, and diagnostics; persist mock state.
+- Replace font customization with custom UID apply/restore and persisted display state; do not change account UID.
+- Add operation progress/gating and uninstall confirmation with UID restoration; remove the unused greeting form and Rust command.
+- Replace the Android launcher with a minimal Tauri 2 desktop/Android shell. Add GitHub CI for frontend, Rust, and Android debug APK builds.
