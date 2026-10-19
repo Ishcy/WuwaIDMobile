@@ -1,14 +1,22 @@
+#[cfg(any(target_os = "android", test))]
 use std::fs::{self, File};
+#[cfg(any(target_os = "android", test))]
 use std::io::{self, BufReader, BufWriter, Write};
+#[cfg(any(target_os = "android", test))]
 use std::path::Path;
 
+#[cfg(any(target_os = "android", test))]
 use rusqlite::Connection;
+#[cfg(any(target_os = "android", test))]
 use sha2::{Digest, Sha256};
+#[cfg(any(target_os = "android", test))]
 use tempfile::NamedTempFile;
 
 use super::model::PakResult;
 
+#[cfg(any(target_os = "android", test))]
 const DATABASE: &str = "Client/Content/Aki/ConfigDB/en/lang_multi_text.db";
+#[cfg(any(target_os = "android", test))]
 const TARGETS: [&str; 3] = [
     "Text_FriendMyUid_Text",
     "Text_UserId_Text",
@@ -16,11 +24,13 @@ const TARGETS: [&str; 3] = [
 ];
 const MAX_UTF16_LENGTH: usize = 32;
 
+#[cfg(any(target_os = "android", test))]
 pub struct DerivedPak {
     file: NamedTempFile,
     pub size: u64,
 }
 
+#[cfg(any(target_os = "android", test))]
 impl DerivedPak {
     pub fn path(&self) -> &Path {
         self.file.path()
@@ -44,6 +54,7 @@ pub fn validate_text(value: &str) -> PakResult<&str> {
     Ok(value)
 }
 
+#[cfg(any(target_os = "android", test))]
 // The caller verifies the release's original size and SHA-256 before deriving.
 // Only a private temporary database is edited; all other PAK entries are preserved.
 pub fn prepare(source: &Path, text: &str) -> PakResult<DerivedPak> {
@@ -134,6 +145,7 @@ pub fn prepare(source: &Path, text: &str) -> PakResult<DerivedPak> {
     Ok(DerivedPak { file: output, size })
 }
 
+#[cfg(any(target_os = "android", test))]
 fn patch_database(path: &Path, text: &str) -> PakResult<()> {
     let mut db = Connection::open(path).map_err(|e| e.to_string())?;
     let tx = db.transaction().map_err(|e| e.to_string())?;
@@ -168,7 +180,9 @@ fn patch_database(path: &Path, text: &str) -> PakResult<()> {
     Ok(())
 }
 
+#[cfg(any(target_os = "android", test))]
 struct HashSink(Sha256);
+#[cfg(any(target_os = "android", test))]
 impl Write for HashSink {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         self.0.update(bytes);
@@ -206,7 +220,7 @@ pub(super) mod tests {
             "../../../".into(),
             None,
         );
-        pak.write_file(DATABASE, false, &fs::read(db_file.path()).unwrap())
+        pak.write_file(DATABASE, false, fs::read(db_file.path()).unwrap())
             .unwrap();
         pak.write_file(
             "Client/Content/other.db",

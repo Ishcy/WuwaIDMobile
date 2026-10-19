@@ -20,6 +20,7 @@ pub struct Release {
     pub sha256: String,
 }
 
+#[cfg(any(target_os = "android", test))]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Progress {
@@ -87,4 +88,5 @@ pub struct ResourceLayout {
 }
 
 pub type PakResult<T> = Result<T, String>;
+#[cfg(any(target_os = "android", test))]
 pub type ProgressCallback<'a> = dyn Fn(Progress) + Send + Sync + 'a;

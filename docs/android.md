@@ -12,6 +12,8 @@ Pasang melalui Android Studio SDK Manager:
 - `cmdline-tools;latest`
 - `ndk;27.3.13750724`
 
+CI/release memakai `android-actions/setup-android@v3` dengan `packages: platform-tools`; paket SDK `tools` sudah tidak tersedia. Platform, Build Tools, dan NDK dipasang terpisah sesuai versi di atas.
+
 Pasang Rust stable dan target yang diperlukan. ARM64:
 
 ```sh
@@ -57,6 +59,8 @@ Buat APK debug ARM64:
 ```sh
 npm run tauri android build -- --debug --apk --target aarch64
 ```
+
+Jangan berbagi `CARGO_TARGET_DIR` antarworktree: Tauri/Wry menghasilkan kode Kotlin pada path proyek. Cache worktree lain dapat melewati generasi dan menyebabkan `TauriActivity` tidak ditemukan pada checkout baru. Gunakan target default `src-tauri/target` atau override milik worktree tersebut; bukan `android init` ulang.
 
 Output berada di `src-tauri/gen/android/app/build/outputs/apk/`. CI membangun ARM64 dengan perintah sama dan menyimpan artifact 14 hari. APK debug memakai package `com.titotfp.wuwaid.debug`, versi `0.4.0-debug`; bisa berdampingan dengan release, tetapi bukan upgrade release. Jangan distribusikan signing debug atau jalankan dua installer bersamaan pada resource game yang sama.
 
