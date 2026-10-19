@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Rebuild CI:** stop requesting the retired Android SDK `tools` package in CI/release setup. Compile installer/cache mutations and UID derivation only on Android or in host tests, retaining desktop release metadata/read-only diagnostics without dead-code suppression. Normalize Rust formatting and resolve the existing Clippy findings without weakening installer safeguards.
+
 - **UI copy:** remove the UID subtitle, app-updater note, access-method safety clause, diagnostics-share note, and uninstall reassurance; shorten the diagnostics-export note to “JSON teredaksi.”
 
 - **WM-30 — Android cache-lock regression:** replace Rust 1.97's unsupported Android `File::try_lock` with nonblocking libc `flock`, sharing the implementation with Linux host tests. Preserve exclusive lock lifetime and distinguish contention from other OS errors. Cross-process host smoke verifies exclusion, live scratch preservation, release after process death, and reacquisition. The user confirmed safe device operation after investigating a competing manual PAK; see the [UID conflict procedure](docs/android.md#konflik-pak-manual-dengan-uid-kustom).
