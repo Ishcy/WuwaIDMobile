@@ -3,6 +3,7 @@
 ## Unreleased
 
 - **AxManager / PR #9:** adapt @Ishcy's contribution to Tauri with explicit, persisted AxManager selection, setup/status/permission actions, diagnostics, and browser scenarios. Use the official Axeron `ShellService` SDK 2.0.1 to reuse the guarded storage service and transactional installer; do not require a running Shizuku server or AX-Permission Intercept. Require Android 8+, user 0, and AxManager 2.0.1+ without raising the app's minimum SDK. Recheck grants/server identity, release sessions on teardown, and never silently switch transports. [Setup, protocol, and QA](docs/android.md#akses-axmanager).
+- **Rebuild CI:** stop requesting the retired Android SDK `tools` package in CI/release setup. Compile installer/cache mutations and UID derivation only on Android or in host tests, retaining desktop release metadata/read-only diagnostics without dead-code suppression. Normalize Rust formatting and resolve the existing Clippy findings without weakening installer safeguards.
 
 - **UI copy:** remove the UID subtitle, app-updater note, access-method safety clause, diagnostics-share note, and uninstall reassurance; shorten the diagnostics-export note to “JSON teredaksi.”
 

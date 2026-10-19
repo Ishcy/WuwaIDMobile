@@ -1,11 +1,15 @@
+#[cfg(any(target_os = "android", test))]
 use serde::{Deserialize, Serialize};
+#[cfg(any(target_os = "android", test))]
 use std::sync::LazyLock;
 
+#[cfg(any(target_os = "android", test))]
 use super::model::PakResult;
 
 pub(super) const DIRECTORY: &str = "wuwaindonesia";
 pub(super) const MOUNT: &str = "wuwaindonesia.txt";
 
+#[cfg(any(target_os = "android", test))]
 #[derive(Deserialize)]
 pub(super) struct PublishedPak {
     pub tag: String,
@@ -15,6 +19,7 @@ pub(super) struct PublishedPak {
     pub sha256: String,
 }
 
+#[cfg(any(target_os = "android", test))]
 // Published TitoTFP/WuwaID asset digests captured on 2026-10-04. Never infer
 // ownership from a filename, cached preferences, or a self-consistent mount alone.
 pub(super) fn published(hash: &str, size: u64) -> PakResult<&'static PublishedPak> {
@@ -27,6 +32,7 @@ pub(super) fn published(hash: &str, size: u64) -> PakResult<&'static PublishedPa
         .ok_or_else(|| "PAK versi lama tidak cocok dengan hash/ukuran rilis resmi yang dikenal. Berkas dipertahankan; jangan hapus atau timpa secara otomatis.".into())
 }
 
+#[cfg(any(target_os = "android", test))]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub(super) struct Proof {
     pub size: u64,
@@ -46,12 +52,23 @@ pub(super) fn paths(version: &str) -> [String; 3] {
 }
 
 pub(super) fn lifecycle_paths(version: &str) -> Vec<String> {
-    paths(version).into_iter().flat_map(|path| {
-        [format!("{path}.new"), format!("{path}.new.tmp"), format!("{path}.bak")]
-    }).collect()
+    paths(version)
+        .into_iter()
+        .flat_map(|path| {
+            [
+                format!("{path}.new"),
+                format!("{path}.new.tmp"),
+                format!("{path}.bak"),
+            ]
+        })
+        .collect()
 }
 
+#[cfg(any(target_os = "android", test))]
 pub(super) fn mount_content(pak_sha1: &str, signature_sha1: &str) -> String {
-    format!("::Mount::\n{DIRECTORY}/WuWaID_99_P,99,{},{},,\n::Del::\n",
-        pak_sha1.to_ascii_uppercase(), signature_sha1.to_ascii_uppercase())
+    format!(
+        "::Mount::\n{DIRECTORY}/WuWaID_99_P,99,{},{},,\n::Del::\n",
+        pak_sha1.to_ascii_uppercase(),
+        signature_sha1.to_ascii_uppercase()
+    )
 }

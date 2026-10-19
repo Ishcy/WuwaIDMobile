@@ -21,7 +21,10 @@ pub fn run() {
             app_update::wuwa_app_update
         ]);
     #[cfg(target_os = "android")]
-    let builder = builder.plugin(android::init()).plugin(app_update::init()).plugin(diagnostics::init());
+    let builder = builder
+        .plugin(android::init())
+        .plugin(app_update::init())
+        .plugin(diagnostics::init());
     builder
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

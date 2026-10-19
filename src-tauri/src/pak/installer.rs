@@ -1,23 +1,32 @@
+// Desktop shares read-only inspection; transaction mutations compile on Android and in host tests.
 use std::collections::HashSet;
+#[cfg(any(target_os = "android", test))]
 use std::fs::{self, File};
+#[cfg(any(target_os = "android", test))]
 use std::io::Read;
+#[cfg(any(target_os = "android", test))]
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::model::{
-    InstallStatus, PakResult, Progress, ProgressCallback, Release, ResourceLayout, MOUNT_FILENAME,
-    PATCH_DIRECTORY, PATCH_FILENAME, PRIORITY, SIGNATURE_FILENAME,
-};
-use super::storage::Storage;
 use super::legacy;
+use super::model::{
+    InstallStatus, PakResult, ResourceLayout, MOUNT_FILENAME, PATCH_DIRECTORY, PATCH_FILENAME,
+    PRIORITY, SIGNATURE_FILENAME,
+};
+#[cfg(any(target_os = "android", test))]
+use super::model::{Progress, ProgressCallback, Release};
+use super::storage::Storage;
 use super::uid;
 
 const SCHEMA_VERSION: u8 = 1;
+#[cfg(any(target_os = "android", test))]
 const JOURNAL_LIMIT: u64 = 64 * 1024;
 const OWNER_LIMIT: u64 = 16 * 1024;
 const SLOTS: [Slot; 4] = [Slot::Pak, Slot::Signature, Slot::Owner, Slot::Mount];
+
+type ResourceVersion = ((u64, u64, u64), String);
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct Owner {
@@ -42,6 +51,7 @@ struct Owner {
     custom_uid: Option<String>,
 }
 
+#[cfg(any(target_os = "android", test))]
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 enum Operation {
     Install,
@@ -56,12 +66,14 @@ enum Slot {
     Mount,
 }
 
+#[cfg(any(target_os = "android", test))]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 struct Snapshot {
     exists: bool,
     sha256: Option<String>,
 }
 
+#[cfg(any(target_os = "android", test))]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 struct Journal {
     schema_version: u8,
@@ -98,7 +110,10 @@ pub fn inspect(storage: &dyn Storage, layout: &ResourceLayout) -> PakResult<Inst
         lifecycle.extend(all_lifecycle_paths(version));
         lifecycle.extend(legacy::lifecycle_paths(version));
     }
-    let legacy_paths: Vec<_> = versions.iter().flat_map(|(_, version)| legacy::paths(version)).collect();
+    let legacy_paths: Vec<_> = versions
+        .iter()
+        .flat_map(|(_, version)| legacy::paths(version))
+        .collect();
     let current_lifecycle = artifact_lifecycle_paths(&layout.version);
     let mut metadata_paths = lifecycle.clone();
     metadata_paths.extend(paths.iter().cloned());
@@ -107,13 +122,24 @@ pub fn inspect(storage: &dyn Storage, layout: &ResourceLayout) -> PakResult<Inst
     metadata_paths.sort_unstable();
     metadata_paths.dedup();
     let metadata = storage.stat_many(&metadata_paths)?;
-    if metadata.len() != metadata_paths.len() { return Err("Incomplete storage metadata batch".into()); }
-    let existing: HashSet<_> = metadata_paths.iter().zip(&metadata)
-        .filter(|(_, stat)| stat.exists).map(|(path, _)| path.as_str()).collect();
-    let recovery_pending = lifecycle.iter().any(|path| existing.contains(path.as_str()));
-    let mut installed = paths.iter().chain(&current_lifecycle).any(|path| existing.contains(path.as_str()));
+    if metadata.len() != metadata_paths.len() {
+        return Err("Incomplete storage metadata batch".into());
+    }
+    let existing: HashSet<_> = metadata_paths
+        .iter()
+        .zip(&metadata)
+        .filter(|(_, stat)| stat.exists)
+        .map(|(path, _)| path.as_str())
+        .collect();
+    let recovery_pending = lifecycle
+        .iter()
+        .any(|path| existing.contains(path.as_str()));
+    let mut installed = paths
+        .iter()
+        .chain(&current_lifecycle)
+        .any(|path| existing.contains(path.as_str()));
     let mut legacy_pending = false;
-    for ((_, version), paths) in versions.iter().zip(legacy_paths.chunks_exact(3)) {
+    for ((_, version), paths) in versions.iter().zip(legacy_paths.as_chunks::<3>().0) {
         if paths.iter().any(|path| existing.contains(path.as_str())) {
             legacy_pending = true;
             installed = true;
@@ -177,6 +203,7 @@ pub fn inspect(storage: &dyn Storage, layout: &ResourceLayout) -> PakResult<Inst
     })
 }
 
+#[cfg(any(target_os = "android", test))]
 fn legacy_present(storage: &dyn Storage, version: &str) -> PakResult<bool> {
     for path in legacy::paths(version) {
         if storage.stat(&path)?.exists {
@@ -186,6 +213,7 @@ fn legacy_present(storage: &dyn Storage, version: &str) -> PakResult<bool> {
     Ok(false)
 }
 
+#[cfg(any(target_os = "android", test))]
 fn ensure_no_legacy_lifecycle(storage: &dyn Storage, version: &str) -> PakResult<()> {
     for path in legacy::lifecycle_paths(version) {
         if storage.stat(&path)?.exists {
@@ -195,17 +223,25 @@ fn ensure_no_legacy_lifecycle(storage: &dyn Storage, version: &str) -> PakResult
     Ok(())
 }
 
+#[cfg(any(target_os = "android", test))]
 fn validate_legacy_proof(proof: &legacy::Proof) -> PakResult<()> {
     legacy::published(&proof.pak_sha256, proof.size)?;
-    if !valid_hash(&proof.pak_sha1, 20) || !valid_hash(&proof.signature_sha256, 32)
+    if !valid_hash(&proof.pak_sha1, 20)
+        || !valid_hash(&proof.signature_sha256, 32)
         || !valid_hash(&proof.signature_sha1, 20)
-        || sha256_text(&legacy::mount_content(&proof.pak_sha1, &proof.signature_sha1)) != proof.mount_sha256
+        || sha256_text(&legacy::mount_content(
+            &proof.pak_sha1,
+            &proof.signature_sha1,
+        )) != proof.mount_sha256
     {
-        return Err("Legacy ownership proof does not describe a supported published installation".into());
+        return Err(
+            "Legacy ownership proof does not describe a supported published installation".into(),
+        );
     }
     Ok(())
 }
 
+#[cfg(any(target_os = "android", test))]
 fn verify_legacy(storage: &dyn Storage, version: &str) -> PakResult<legacy::Proof> {
     validate_version(version)?;
     ensure_no_legacy_lifecycle(storage, version)?;
@@ -236,21 +272,31 @@ fn verify_legacy(storage: &dyn Storage, version: &str) -> PakResult<legacy::Proo
     Ok(proof)
 }
 
+#[cfg(any(target_os = "android", test))]
 fn cleanup_legacy(storage: &dyn Storage, version: &str, proof: &legacy::Proof) -> PakResult<()> {
     validate_legacy_proof(proof)?;
     ensure_no_legacy_lifecycle(storage, version)?;
     let paths = legacy::paths(version);
-    let expected = [&proof.pak_sha256, &proof.signature_sha256, &proof.mount_sha256];
+    let expected = [
+        &proof.pak_sha256,
+        &proof.signature_sha256,
+        &proof.mount_sha256,
+    ];
     // Missing sources are allowed only after the exact new install has committed.
     for (path, hash) in paths.iter().zip(expected) {
         if storage.stat(path)?.exists && checked_hash(storage, path, "sha256")? != *hash {
-            return Err(format!("Berkas lama berubah setelah migrasi; dipertahankan: {path}"));
+            return Err(format!(
+                "Berkas lama berubah setelah migrasi; dipertahankan: {path}"
+            ));
         }
     }
     for index in [2, 0, 1] {
         if storage.stat(&paths[index])?.exists {
             if checked_hash(storage, &paths[index], "sha256")? != *expected[index] {
-                return Err(format!("Berkas lama berubah saat cleanup: {}", paths[index]));
+                return Err(format!(
+                    "Berkas lama berubah saat cleanup: {}",
+                    paths[index]
+                ));
             }
             storage.remove(&paths[index])?;
         }
@@ -262,6 +308,7 @@ fn cleanup_legacy(storage: &dyn Storage, version: &str, proof: &legacy::Proof) -
     Ok(())
 }
 
+#[cfg(any(target_os = "android", test))]
 pub fn migrate_legacy(
     storage: &dyn Storage,
     layout: &ResourceLayout,
@@ -278,7 +325,10 @@ pub fn migrate_legacy(
         }
         let conflicts = find_conflicting_mounts(storage, &version, true)?;
         if !conflicts.is_empty() {
-            return Err(format!("Mount lain menghalangi migrasi: {}", conflicts.join(", ")));
+            return Err(format!(
+                "Mount lain menghalangi migrasi: {}",
+                conflicts.join(", ")
+            ));
         }
         migrations.push((version.clone(), verify_legacy(storage, &version)?));
     }
@@ -314,8 +364,12 @@ pub fn migrate_legacy(
         };
         validate_owner(&owner, &version)?;
         let owner_json = serde_json::to_string(&owner).map_err(|error| error.to_string())?;
-        let expected = vec![Some(proof.pak_sha256.clone()), Some(proof.signature_sha256.clone()),
-            Some(sha256_text(&owner_json)), Some(owner.mount_sha256.clone())];
+        let expected = vec![
+            Some(proof.pak_sha256.clone()),
+            Some(proof.signature_sha256.clone()),
+            Some(sha256_text(&owner_json)),
+            Some(owner.mount_sha256.clone()),
+        ];
         storage.mkdir(&format!("{version}/{PATCH_DIRECTORY}"))?;
         notify(progress, 74, "Menyiapkan migrasi pemasangan versi lama");
         let staged = (|| {
@@ -324,7 +378,9 @@ pub fn migrate_legacy(
             storage.write_text(&stages[2], &owner_json)?;
             storage.write_text(&stages[3], &mount)?;
             for (path, hash) in stages.iter().zip(&expected) {
-                if checked_hash(storage, path, "sha256")?.as_str() != hash.as_deref().expect("migration output") {
+                if checked_hash(storage, path, "sha256")?.as_str()
+                    != hash.as_deref().expect("migration output")
+                {
                     return Err(format!("Berkas migrasi sementara berubah: {path}"));
                 }
             }
@@ -334,9 +390,15 @@ pub fn migrate_legacy(
             Ok(())
         })();
         if let Err(error) = staged {
-            return Err(append_cleanup_error(error, clean_stages(storage, &stages, &expected)));
+            return Err(append_cleanup_error(
+                error,
+                clean_stages(storage, &stages, &expected),
+            ));
         }
-        let migrated_layout = ResourceLayout { version: version.clone(), signature: String::new() };
+        let migrated_layout = ResourceLayout {
+            version: version.clone(),
+            signature: String::new(),
+        };
         commit_stages(storage, &migrated_layout, expected, Some(proof), progress)?;
         if version != layout.version {
             uninstall_current(storage, &migrated_layout, progress)?;
@@ -345,6 +407,7 @@ pub fn migrate_legacy(
     inspect(storage, layout)
 }
 
+#[cfg(any(target_os = "android", test))]
 pub fn install(
     storage: &dyn Storage,
     layout: &ResourceLayout,
@@ -358,6 +421,7 @@ pub fn install(
     install_current(storage, layout, release, pak, custom_uid, progress)
 }
 
+#[cfg(any(target_os = "android", test))]
 pub fn repair(
     storage: &dyn Storage,
     layout: &ResourceLayout,
@@ -371,15 +435,20 @@ pub fn repair(
     install_current(storage, layout, release, pak, custom_uid, progress)
 }
 
+#[cfg(any(target_os = "android", test))]
 pub fn recover(
     storage: &dyn Storage,
     layout: &ResourceLayout,
     progress: &ProgressCallback,
 ) -> PakResult<InstallStatus> {
     recover_transactions(storage, layout, progress)?;
-    { let _phase = crate::trace::Span::new("inspect.terminal"); inspect(storage, layout) }
+    {
+        let _phase = crate::trace::Span::new("inspect.terminal");
+        inspect(storage, layout)
+    }
 }
 
+#[cfg(any(target_os = "android", test))]
 fn recover_transactions(
     storage: &dyn Storage,
     layout: &ResourceLayout,
@@ -414,6 +483,7 @@ fn recover_transactions(
     Ok(())
 }
 
+#[cfg(any(target_os = "android", test))]
 pub fn uninstall(
     storage: &dyn Storage,
     layout: &ResourceLayout,
@@ -431,7 +501,14 @@ pub fn uninstall(
     }
     for (_, version) in versions {
         if load_owner(storage, &version)?.is_some() {
-            uninstall_current(storage, &ResourceLayout { version, signature: String::new() }, progress)?;
+            uninstall_current(
+                storage,
+                &ResourceLayout {
+                    version,
+                    signature: String::new(),
+                },
+                progress,
+            )?;
         } else if paths_have_artifacts(storage, &version)? {
             return Err("Refusing to uninstall unowned files in an older resource version".into());
         }
@@ -439,6 +516,7 @@ pub fn uninstall(
     inspect(storage, layout)
 }
 
+#[cfg(any(target_os = "android", test))]
 fn uninstall_current(
     storage: &dyn Storage,
     layout: &ResourceLayout,
@@ -454,7 +532,10 @@ fn uninstall_current(
                     .to_owned(),
             );
         }
-        return { let _phase = crate::trace::Span::new("inspect.terminal"); inspect(storage, layout) };
+        return {
+            let _phase = crate::trace::Span::new("inspect.terminal");
+            inspect(storage, layout)
+        };
     };
     verify_owned_content_for_uninstall(storage, &layout.version, &owner)?;
     let before = capture_snapshots(storage, &layout.version)?;
@@ -486,9 +567,13 @@ fn uninstall_current(
         }
     }
     notify(progress, 100, "Penghapusan selesai");
-    { let _phase = crate::trace::Span::new("inspect.terminal"); inspect(storage, layout) }
+    {
+        let _phase = crate::trace::Span::new("inspect.terminal");
+        inspect(storage, layout)
+    }
 }
 
+#[cfg(any(target_os = "android", test))]
 fn install_current(
     storage: &dyn Storage,
     layout: &ResourceLayout,
@@ -542,7 +627,10 @@ fn install_current(
         ));
     }
 
-    let source_sha256 = { let _phase = crate::trace::Span::new("payload.hash"); hash_local_file(pak)? };
+    let source_sha256 = {
+        let _phase = crate::trace::Span::new("payload.hash");
+        hash_local_file(pak)?
+    };
     if !source_sha256.eq_ignore_ascii_case(&release.sha256) {
         return Err("Downloaded PAK SHA-256 does not match release metadata".to_owned());
     }
@@ -563,7 +651,10 @@ fn install_current(
     };
     let payload = derived.as_ref().map(|pak| pak.path()).unwrap_or(pak);
     let expected_sha256 = if derived.is_some() {
-        { let _phase = crate::trace::Span::new("payload.hash"); hash_local_file(payload)? }
+        {
+            let _phase = crate::trace::Span::new("payload.hash");
+            hash_local_file(payload)?
+        }
     } else {
         source_sha256.clone()
     };
@@ -601,8 +692,14 @@ fn install_current(
             return Err("Cloned signature did not verify against its official source".to_owned());
         }
 
-        let pak_sha1 = staged_pak.sha1.expect("verified SHA-1").to_ascii_uppercase();
-        let signature_sha1 = staged_signature.sha1.expect("verified SHA-1").to_ascii_uppercase();
+        let pak_sha1 = staged_pak
+            .sha1
+            .expect("verified SHA-1")
+            .to_ascii_uppercase();
+        let signature_sha1 = staged_signature
+            .sha1
+            .expect("verified SHA-1")
+            .to_ascii_uppercase();
         if signature_sha1.to_ascii_lowercase() != official_signature_sha1 {
             return Err("Cloned signature SHA-1 does not match its official source".to_owned());
         }
@@ -673,6 +770,7 @@ fn install_current(
     commit_stages(storage, layout, staged_hashes, None, progress)
 }
 
+#[cfg(any(target_os = "android", test))]
 fn commit_stages(
     storage: &dyn Storage,
     layout: &ResourceLayout,
@@ -722,12 +820,16 @@ fn commit_stages(
             notify(progress, 96, "Memverifikasi hasil pemasangan");
             finalize_journal(storage, &layout.version, &journal)?;
             notify(progress, 100, "Pemasangan selesai");
-            { let _phase = crate::trace::Span::new("inspect.terminal"); inspect(storage, layout) }
+            {
+                let _phase = crate::trace::Span::new("inspect.terminal");
+                inspect(storage, layout)
+            }
         }
         Err(error) => Err(recover_after_failure(storage, layout, progress, error)),
     }
 }
 
+#[cfg(any(target_os = "android", test))]
 fn validate_release(release: &Release, pak: &Path) -> PakResult<()> {
     if !valid_hash(&release.sha256, 32) {
         return Err("Release SHA-256 metadata is malformed".to_owned());
@@ -753,7 +855,7 @@ fn validate_release(release: &Release, pak: &Path) -> PakResult<()> {
     Ok(())
 }
 
-fn resource_versions(storage: &dyn Storage) -> PakResult<Vec<((u64, u64, u64), String)>> {
+fn resource_versions(storage: &dyn Storage) -> PakResult<Vec<ResourceVersion>> {
     let mut versions = Vec::new();
     for entry in storage.list("")? {
         if !entry.is_dir {
@@ -763,7 +865,7 @@ fn resource_versions(storage: &dyn Storage) -> PakResult<Vec<((u64, u64, u64), S
             versions.push((parsed, entry.name));
         }
     }
-    versions.sort_by(|left, right| left.0.cmp(&right.0));
+    versions.sort_by_key(|version| version.0);
     Ok(versions)
 }
 
@@ -850,7 +952,11 @@ fn strip_extension_ignore_case<'a>(name: &'a str, extension: &str) -> Option<&'a
         .then_some(&name[..split_at])
 }
 
-fn find_conflicting_mounts(storage: &dyn Storage, version: &str, allow_legacy: bool) -> PakResult<Vec<String>> {
+fn find_conflicting_mounts(
+    storage: &dyn Storage,
+    version: &str,
+    allow_legacy: bool,
+) -> PakResult<Vec<String>> {
     let mount_dir = format!("{version}/Mount");
     let stat = storage.stat(&mount_dir)?;
     if !stat.exists {
@@ -897,6 +1003,7 @@ fn target_paths(version: &str) -> Vec<String> {
         .collect()
 }
 
+#[cfg(any(target_os = "android", test))]
 fn stage_paths(version: &str) -> Vec<String> {
     target_paths(version)
         .into_iter()
@@ -904,6 +1011,7 @@ fn stage_paths(version: &str) -> Vec<String> {
         .collect()
 }
 
+#[cfg(any(target_os = "android", test))]
 fn backup_paths(version: &str) -> Vec<String> {
     target_paths(version)
         .into_iter()
@@ -944,18 +1052,23 @@ fn all_lifecycle_paths(version: &str) -> Vec<String> {
     paths
 }
 
-
+#[cfg(any(target_os = "android", test))]
 fn has_artifact_lifecycle_files(storage: &dyn Storage, version: &str) -> PakResult<bool> {
     let paths = artifact_lifecycle_paths(version);
     let stats = storage.stat_many(&paths)?;
-    if stats.len() != paths.len() { return Err("Incomplete lifecycle metadata batch".into()); }
+    if stats.len() != paths.len() {
+        return Err("Incomplete lifecycle metadata batch".into());
+    }
     Ok(stats.iter().any(|stat| stat.exists))
 }
 
+#[cfg(any(target_os = "android", test))]
 fn ensure_no_lifecycle_files(storage: &dyn Storage, version: &str) -> PakResult<()> {
     let paths = all_lifecycle_paths(version);
     let stats = storage.stat_many(&paths)?;
-    if stats.len() != paths.len() { return Err("Incomplete lifecycle metadata batch".into()); }
+    if stats.len() != paths.len() {
+        return Err("Incomplete lifecycle metadata batch".into());
+    }
     for (path, stat) in paths.iter().zip(stats) {
         if stat.exists {
             return Err(format!("Unexpected installer lifecycle path {path}; recover or remove it only after verifying ownership"));
@@ -964,6 +1077,7 @@ fn ensure_no_lifecycle_files(storage: &dyn Storage, version: &str) -> PakResult<
     Ok(())
 }
 
+#[cfg(any(target_os = "android", test))]
 fn paths_have_artifacts(storage: &dyn Storage, version: &str) -> PakResult<bool> {
     for path in target_paths(version) {
         if file_exists(storage, &path)? {
@@ -973,6 +1087,7 @@ fn paths_have_artifacts(storage: &dyn Storage, version: &str) -> PakResult<bool>
     Ok(false)
 }
 
+#[cfg(any(target_os = "android", test))]
 fn file_exists(storage: &dyn Storage, path: &str) -> PakResult<bool> {
     Ok(storage.stat(path)?.exists)
 }
@@ -1069,15 +1184,27 @@ fn verify_owned_content(storage: &dyn Storage, version: &str, owner: &Owner) -> 
     let paths = target_paths(version);
     for index in 0..SLOTS.len() {
         let hashes = if expected[index].is_some() {
-            Some(checked_hashes(storage, &paths[index], expected_sha1[index].is_some())?)
+            Some(checked_hashes(
+                storage,
+                &paths[index],
+                expected_sha1[index].is_some(),
+            )?)
         } else {
             let stat = storage.stat(&paths[index])?;
-            if !stat.exists || stat.is_dir { return Err(format!("Owned installer file is missing or not a file: {}", paths[index])); }
+            if !stat.exists || stat.is_dir {
+                return Err(format!(
+                    "Owned installer file is missing or not a file: {}",
+                    paths[index]
+                ));
+            }
             None
         };
         if let Some(expected_hash) = &expected[index] {
             if hashes.as_ref().expect("requested hashes").sha256 != *expected_hash {
-                return Err(format!("Owned installer file failed SHA-256 verification: {}", paths[index]));
+                return Err(format!(
+                    "Owned installer file failed SHA-256 verification: {}",
+                    paths[index]
+                ));
             }
         }
         if let Some(expected_hash) = &expected_sha1[index] {
@@ -1091,6 +1218,7 @@ fn verify_owned_content(storage: &dyn Storage, version: &str, owner: &Owner) -> 
     }
     Ok(())
 }
+#[cfg(any(target_os = "android", test))]
 fn verify_owned_content_for_uninstall(
     storage: &dyn Storage,
     version: &str,
@@ -1125,8 +1253,14 @@ fn verify_owned_content_for_uninstall(
             ));
         }
         let hashes = if expected[index].is_some() {
-            Some(checked_hashes(storage, &paths[index], expected_sha1[index].is_some())?)
-        } else { None };
+            Some(checked_hashes(
+                storage,
+                &paths[index],
+                expected_sha1[index].is_some(),
+            )?)
+        } else {
+            None
+        };
         if let Some(hash) = &expected[index] {
             if hashes.as_ref().expect("requested hashes").sha256 != *hash {
                 return Err(format!(
@@ -1147,6 +1281,7 @@ fn verify_owned_content_for_uninstall(
     Ok(())
 }
 
+#[cfg(any(target_os = "android", test))]
 fn capture_snapshots(storage: &dyn Storage, version: &str) -> PakResult<Vec<Snapshot>> {
     let mut snapshots = Vec::with_capacity(SLOTS.len());
     for path in target_paths(version) {
@@ -1171,6 +1306,7 @@ fn capture_snapshots(storage: &dyn Storage, version: &str) -> PakResult<Vec<Snap
     Ok(snapshots)
 }
 
+#[cfg(any(target_os = "android", test))]
 fn validate_journal(journal: &Journal, version: &str) -> PakResult<()> {
     if journal.schema_version != SCHEMA_VERSION || journal.resource_version != version {
         return Err("Transaction journal has an unsupported schema or resource version".to_owned());
@@ -1198,12 +1334,18 @@ fn validate_journal(journal: &Journal, version: &str) -> PakResult<()> {
     }
     if let Some(proof) = &journal.legacy {
         validate_legacy_proof(proof)?;
-        if journal.operation != Operation::Install || journal.before.iter().any(|snapshot| snapshot.exists)
+        if journal.operation != Operation::Install
+            || journal.before.iter().any(|snapshot| snapshot.exists)
             || journal.after[0].as_deref() != Some(proof.pak_sha256.as_str())
             || journal.after[1].as_deref() != Some(proof.signature_sha256.as_str())
-            || journal.after[3].as_deref() != Some(sha256_text(&mount_content(&proof.pak_sha1, &proof.signature_sha1)).as_str())
+            || journal.after[3].as_deref()
+                != Some(
+                    sha256_text(&mount_content(&proof.pak_sha1, &proof.signature_sha1)).as_str(),
+                )
         {
-            return Err("Legacy migration journal does not preserve the verified legacy payload".into());
+            return Err(
+                "Legacy migration journal does not preserve the verified legacy payload".into(),
+            );
         }
     }
     match journal.operation {
@@ -1233,6 +1375,7 @@ fn validate_journal(journal: &Journal, version: &str) -> PakResult<()> {
     Ok(())
 }
 
+#[cfg(any(target_os = "android", test))]
 fn verify_journal_payload(
     storage: &dyn Storage,
     version: &str,
@@ -1277,6 +1420,7 @@ fn verify_journal_payload(
     Ok(())
 }
 
+#[cfg(any(target_os = "android", test))]
 fn write_initial_journal(storage: &dyn Storage, journal: &Journal) -> PakResult<()> {
     let version = &journal.resource_version;
     let canonical = journal_path(version);
@@ -1301,6 +1445,7 @@ fn write_initial_journal(storage: &dyn Storage, journal: &Journal) -> PakResult<
         .map_err(|error| format!("Could not publish transaction journal: {error}"))
 }
 
+#[cfg(any(target_os = "android", test))]
 fn fully_applied(storage: &dyn Storage, version: &str, journal: &Journal) -> PakResult<bool> {
     for (index, path) in target_paths(version).iter().enumerate() {
         let stat = storage.stat(path)?;
@@ -1317,6 +1462,7 @@ fn fully_applied(storage: &dyn Storage, version: &str, journal: &Journal) -> Pak
     Ok(true)
 }
 
+#[cfg(any(target_os = "android", test))]
 fn apply_journal(storage: &dyn Storage, version: &str, journal: &Journal) -> PakResult<()> {
     let _phase = crate::trace::Span::new("journal.apply");
     backup_current_targets(storage, version, journal)?;
@@ -1348,6 +1494,7 @@ fn apply_journal(storage: &dyn Storage, version: &str, journal: &Journal) -> Pak
     Ok(())
 }
 
+#[cfg(any(target_os = "android", test))]
 fn backup_current_targets(
     storage: &dyn Storage,
     version: &str,
@@ -1427,6 +1574,7 @@ fn backup_current_targets(
     Ok(())
 }
 
+#[cfg(any(target_os = "android", test))]
 fn verify_committed_install(
     storage: &dyn Storage,
     version: &str,
@@ -1441,6 +1589,7 @@ fn verify_committed_install(
     verify_owned_content(storage, version, &owner)
 }
 
+#[cfg(any(target_os = "android", test))]
 fn rollback_journal(storage: &dyn Storage, version: &str, journal: &Journal) -> PakResult<()> {
     validate_journal(journal, version)?;
     if journal.before[2].exists {
@@ -1541,6 +1690,7 @@ fn rollback_journal(storage: &dyn Storage, version: &str, journal: &Journal) -> 
     Ok(())
 }
 
+#[cfg(any(target_os = "android", test))]
 fn finalize_journal(storage: &dyn Storage, version: &str, journal: &Journal) -> PakResult<()> {
     let _phase = crate::trace::Span::new("journal.finalize");
     validate_journal(journal, version)?;
@@ -1593,6 +1743,7 @@ fn finalize_journal(storage: &dyn Storage, version: &str, journal: &Journal) -> 
     remove_journal_files(storage, version, journal)
 }
 
+#[cfg(any(target_os = "android", test))]
 fn verify_before_snapshot(
     storage: &dyn Storage,
     version: &str,
@@ -1616,6 +1767,7 @@ fn verify_before_snapshot(
     Ok(())
 }
 
+#[cfg(any(target_os = "android", test))]
 fn verify_previous_owner(storage: &dyn Storage, version: &str, journal: &Journal) -> PakResult<()> {
     let path = target_path(version, Slot::Owner);
     let backup = format!("{path}.bak");
@@ -1639,6 +1791,7 @@ fn verify_previous_owner(storage: &dyn Storage, version: &str, journal: &Journal
     Err("Previous owner metadata cannot be verified from the transaction snapshot".to_owned())
 }
 
+#[cfg(any(target_os = "android", test))]
 fn remove_journal_files(storage: &dyn Storage, version: &str, journal: &Journal) -> PakResult<()> {
     for path in journal_lifecycle_paths(version) {
         if !file_exists(storage, &path)? {
@@ -1663,6 +1816,7 @@ fn remove_journal_files(storage: &dyn Storage, version: &str, journal: &Journal)
     Ok(())
 }
 
+#[cfg(any(target_os = "android", test))]
 fn read_pending_journal(storage: &dyn Storage, version: &str) -> PakResult<Option<Journal>> {
     let paths = journal_lifecycle_paths(version);
     let mut selected: Option<Journal> = None;
@@ -1696,6 +1850,7 @@ fn read_pending_journal(storage: &dyn Storage, version: &str) -> PakResult<Optio
     Ok(selected)
 }
 
+#[cfg(any(target_os = "android", test))]
 fn recover_after_failure(
     storage: &dyn Storage,
     layout: &ResourceLayout,
@@ -1714,6 +1869,7 @@ fn recover_after_failure(
     }
 }
 
+#[cfg(any(target_os = "android", test))]
 fn clean_stages(
     storage: &dyn Storage,
     stages: &[String],
@@ -1748,6 +1904,7 @@ fn clean_stages(
     }
 }
 
+#[cfg(any(target_os = "android", test))]
 fn append_cleanup_error(error: String, cleanup: PakResult<()>) -> String {
     match cleanup {
         Ok(()) => error,
@@ -1755,25 +1912,41 @@ fn append_cleanup_error(error: String, cleanup: PakResult<()>) -> String {
     }
 }
 
-fn checked_hashes(storage: &dyn Storage, path: &str, with_sha1: bool) -> PakResult<super::model::FileHashes> {
+fn checked_hashes(
+    storage: &dyn Storage,
+    path: &str,
+    with_sha1: bool,
+) -> PakResult<super::model::FileHashes> {
     let mut hashes = storage.hashes(path, with_sha1)?;
     hashes.sha256.make_ascii_lowercase();
-    if let Some(sha1) = &mut hashes.sha1 { sha1.make_ascii_lowercase(); }
-    if !valid_hash(&hashes.sha256, 32) || (with_sha1 && !hashes.sha1.as_ref().is_some_and(|hash| valid_hash(hash, 20))) {
+    if let Some(sha1) = &mut hashes.sha1 {
+        sha1.make_ascii_lowercase();
+    }
+    if !valid_hash(&hashes.sha256, 32)
+        || (with_sha1
+            && !hashes
+                .sha1
+                .as_ref()
+                .is_some_and(|hash| valid_hash(hash, 20)))
+    {
         return Err(format!("Storage returned invalid digests for {path}"));
     }
     Ok(hashes)
 }
 
+#[cfg(any(target_os = "android", test))]
 fn checked_hash(storage: &dyn Storage, path: &str, algorithm: &str) -> PakResult<String> {
     let hashes = checked_hashes(storage, path, algorithm == "sha1")?;
     if algorithm == "sha1" {
-        hashes.sha1.ok_or_else(|| "Storage omitted the requested SHA-1 digest".to_owned())
+        hashes
+            .sha1
+            .ok_or_else(|| "Storage omitted the requested SHA-1 digest".to_owned())
     } else {
         Ok(hashes.sha256)
     }
 }
 
+#[cfg(any(target_os = "android", test))]
 fn hash_local_file(path: &Path) -> PakResult<String> {
     let mut file =
         File::open(path).map_err(|error| format!("Could not open downloaded PAK: {error}"))?;
@@ -1839,6 +2012,7 @@ fn validate_version(value: &str) -> PakResult<()> {
     Ok(())
 }
 
+#[cfg(any(target_os = "android", test))]
 fn notify(progress: &ProgressCallback, percent: u8, label: &str) {
     progress(Progress {
         percent,
@@ -1927,14 +2101,18 @@ mod tests {
         assert_eq!(
             storage
                 .hashes(&resolved_pak, true)
-                .expect("mounted PAK hash").sha1.expect("SHA-1")
+                .expect("mounted PAK hash")
+                .sha1
+                .expect("SHA-1")
                 .to_ascii_uppercase(),
             fields[2]
         );
         assert_eq!(
             storage
                 .hashes(&resolved_signature, true)
-                .expect("mounted signature hash").sha1.expect("SHA-1")
+                .expect("mounted signature hash")
+                .sha1
+                .expect("SHA-1")
                 .to_ascii_uppercase(),
             fields[3]
         );
@@ -2261,7 +2439,11 @@ mod tests {
         fn read_text(&self, path: &str) -> PakResult<String> {
             self.inner.read_text(path)
         }
-        fn hashes(&self, path: &str, with_sha1: bool) -> PakResult<super::super::model::FileHashes> {
+        fn hashes(
+            &self,
+            path: &str,
+            with_sha1: bool,
+        ) -> PakResult<super::super::model::FileHashes> {
             self.inner.hashes(path, with_sha1)
         }
         fn stat_many(&self, paths: &[String]) -> PakResult<Vec<super::super::model::FileStat>> {
@@ -2312,7 +2494,12 @@ mod tests {
         let snapshot_paths = target_paths(&layout.version);
         let before_hashes: Vec<_> = snapshot_paths
             .iter()
-            .map(|path| storage.hashes(path, false).map(|hashes| hashes.sha256).expect("pre-transaction hash"))
+            .map(|path| {
+                storage
+                    .hashes(path, false)
+                    .map(|hashes| hashes.sha256)
+                    .expect("pre-transaction hash")
+            })
             .collect();
 
         let updated_pak = pak.with_file_name("updated.pak");
@@ -2371,7 +2558,10 @@ mod tests {
         assert_eq!(restored.version, first_release.tag);
         for (path, expected_hash) in snapshot_paths.iter().zip(before_hashes) {
             assert_eq!(
-                storage.hashes(path, false).expect("restored file hash").sha256,
+                storage
+                    .hashes(path, false)
+                    .expect("restored file hash")
+                    .sha256,
                 expected_hash
             );
         }
@@ -2409,24 +2599,48 @@ mod tests {
         );
         assert_ne!(owner.pak_sha256, release.sha256);
         let target = target_path(&layout.version, Slot::Pak);
-        assert_eq!(owner.pak_sha256, storage.hashes(&target, false).unwrap().sha256);
+        assert_eq!(
+            owner.pak_sha256,
+            storage.hashes(&target, false).unwrap().sha256
+        );
         let mount = storage
             .read_text(&target_path(&layout.version, Slot::Mount))
             .unwrap();
         assert_eq!(
             mount,
             mount_content(
-                &storage.hashes(&target, true).unwrap().sha1.unwrap().to_ascii_uppercase(),
+                &storage
+                    .hashes(&target, true)
+                    .unwrap()
+                    .sha1
+                    .unwrap()
+                    .to_ascii_uppercase(),
                 &storage
                     .hashes(&layout.signature, true)
-                    .unwrap().sha1.unwrap()
+                    .unwrap()
+                    .sha1
+                    .unwrap()
                     .to_ascii_uppercase(),
             )
         );
-        let replaced = install(&storage, &layout, &release, &pak, Some("Rover Nusantara"), &no_progress).unwrap();
+        let replaced = install(
+            &storage,
+            &layout,
+            &release,
+            &pak,
+            Some("Rover Nusantara"),
+            &no_progress,
+        )
+        .unwrap();
         assert!(replaced.healthy && !replaced.recovery_pending);
         assert_eq!(replaced.custom_uid.as_deref(), Some("Rover Nusantara"));
-        assert_ne!(load_owner(&storage, &layout.version).unwrap().unwrap().pak_sha256, owner.pak_sha256);
+        assert_ne!(
+            load_owner(&storage, &layout.version)
+                .unwrap()
+                .unwrap()
+                .pak_sha256,
+            owner.pak_sha256
+        );
         storage.remove(&target).unwrap();
         let repaired = repair(
             &storage,
@@ -2442,7 +2656,10 @@ mod tests {
         let reset = install(&storage, &layout, &release, &pak, None, &no_progress).unwrap();
         assert!(reset.healthy);
         assert_eq!(reset.custom_uid, None);
-        assert_eq!(storage.hashes(&target, false).unwrap().sha256, release.sha256);
+        assert_eq!(
+            storage.hashes(&target, false).unwrap().sha256,
+            release.sha256
+        );
         assert_eq!(fs::read(&pak).unwrap(), original);
         assert_eq!(
             fs::read(root.path().join(&layout.signature)).unwrap(),
@@ -2497,7 +2714,9 @@ mod tests {
         for slot in SLOTS {
             let (root, storage, pak, layout) = setup_fixture();
             let storage = Arc::new(storage);
-            let patch = root.path().join(format!("{}/{PATCH_DIRECTORY}", layout.version));
+            let patch = root
+                .path()
+                .join(format!("{}/{PATCH_DIRECTORY}", layout.version));
             fs::create_dir(&patch).unwrap();
             fs::write(patch.join("user-note"), b"do not remove").unwrap();
             let signature = fs::read(root.path().join(&layout.signature)).unwrap();
@@ -2512,13 +2731,27 @@ mod tests {
             assert!(!after.installed && !after.recovery_pending);
             for path in target_paths(&layout.version) {
                 for suffix in ["", ".new", ".bak"] {
-                    assert!(!root.path().join(format!("{path}{suffix}")).exists(), "{path}{suffix}");
+                    assert!(
+                        !root.path().join(format!("{path}{suffix}")).exists(),
+                        "{path}{suffix}"
+                    );
                 }
             }
             assert!(!patch.join(".transaction.json").exists());
             assert_eq!(fs::read(patch.join("user-note")).unwrap(), b"do not remove");
-            assert_eq!(fs::read(root.path().join(&layout.signature)).unwrap(), signature);
-            let retried = install(storage.as_ref(), &layout, &release, &pak, None, &no_progress).unwrap();
+            assert_eq!(
+                fs::read(root.path().join(&layout.signature)).unwrap(),
+                signature
+            );
+            let retried = install(
+                storage.as_ref(),
+                &layout,
+                &release,
+                &pak,
+                None,
+                &no_progress,
+            )
+            .unwrap();
             assert!(retried.installed && retried.healthy && !retried.recovery_pending);
             assert_mount_resolves(root.path(), storage.as_ref(), &layout, &pak);
         }
@@ -2532,10 +2765,19 @@ mod tests {
             let source = fs::read(&pak).unwrap();
             let release = release(&pak, "v3.7.1-id.1");
             assert!(install(&storage, &layout, &release, &pak, Some(text), &no_progress).is_err());
-            assert!(!root.path().join(format!("{}/{PATCH_DIRECTORY}", layout.version)).exists());
-            assert!(!root.path().join(target_path(&layout.version, Slot::Mount)).exists());
+            assert!(!root
+                .path()
+                .join(format!("{}/{PATCH_DIRECTORY}", layout.version))
+                .exists());
+            assert!(!root
+                .path()
+                .join(target_path(&layout.version, Slot::Mount))
+                .exists());
             assert_eq!(fs::read(&pak).unwrap(), source);
-            assert_eq!(fs::read(root.path().join(&layout.signature)).unwrap(), b"official signature bytes");
+            assert_eq!(
+                fs::read(root.path().join(&layout.signature)).unwrap(),
+                b"official signature bytes"
+            );
         }
     }
 }

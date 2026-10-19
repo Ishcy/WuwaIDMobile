@@ -186,17 +186,29 @@ impl Storage for LocalStorage {
         let mut size = 0;
         loop {
             let count = file.read(&mut buffer).map_err(|e| e.to_string())?;
-            if count == 0 { break; }
+            if count == 0 {
+                break;
+            }
             sha256.update(&buffer[..count]);
-            if let Some(sha1) = &mut sha1 { sha1.update(&buffer[..count]); }
+            if let Some(sha1) = &mut sha1 {
+                sha1.update(&buffer[..count]);
+            }
             size += count as u64;
         }
-        let after = fs::symlink_metadata(self.checked_path(path, false)?).map_err(|e| e.to_string())?;
-        if !after.is_file() || size != before.len() || size != after.len() || before.modified().ok() != after.modified().ok() {
+        let after =
+            fs::symlink_metadata(self.checked_path(path, false)?).map_err(|e| e.to_string())?;
+        if !after.is_file()
+            || size != before.len()
+            || size != after.len()
+            || before.modified().ok() != after.modified().ok()
+        {
             return Err(format!("Resource changed while hashing: {path}"));
         }
-        Ok(FileHashes { size, sha256: hex::encode(sha256.finalize()),
-            sha1: sha1.map(|hash| hex::encode(hash.finalize())) })
+        Ok(FileHashes {
+            size,
+            sha256: hex::encode(sha256.finalize()),
+            sha1: sha1.map(|hash| hex::encode(hash.finalize())),
+        })
     }
 
     fn mkdir(&self, path: &str) -> PakResult<()> {
@@ -382,8 +394,13 @@ mod tests {
         assert!(storage.write_text(target, "replacement").is_err());
         assert!(storage.copy(source, target).is_err());
         assert!(storage.move_file(source, target).is_err());
-        assert!(storage.write_from_file(target, &root.path().join(source)).is_err());
-        assert_eq!(fs::read(root.path().join(target)).unwrap(), b"unowned collision");
+        assert!(storage
+            .write_from_file(target, &root.path().join(source))
+            .is_err());
+        assert_eq!(
+            fs::read(root.path().join(target)).unwrap(),
+            b"unowned collision"
+        );
         assert_eq!(fs::read(root.path().join(source)).unwrap(), b"new payload");
     }
 

@@ -12,6 +12,8 @@ Pasang melalui Android Studio SDK Manager:
 - `cmdline-tools;latest`
 - `ndk;27.3.13750724`
 
+CI/release memakai `android-actions/setup-android@v3` dengan `packages: platform-tools`; paket SDK `tools` sudah tidak tersedia. Platform, Build Tools, dan NDK dipasang terpisah sesuai versi di atas.
+
 Pasang Rust stable dan target yang diperlukan. ARM64:
 
 ```sh
@@ -58,6 +60,8 @@ Buat APK debug ARM64:
 npm run tauri android build -- --debug --apk --target aarch64
 ```
 
+Jangan berbagi `CARGO_TARGET_DIR` antarworktree: Tauri/Wry menghasilkan kode Kotlin pada path proyek. Cache worktree lain dapat melewati generasi dan menyebabkan `TauriActivity` tidak ditemukan pada checkout baru. Gunakan target default `src-tauri/target` atau override milik worktree tersebut; bukan `android init` ulang.
+
 Output berada di `src-tauri/gen/android/app/build/outputs/apk/`. CI membangun ARM64 dengan perintah sama dan menyimpan artifact 14 hari. APK debug memakai package `com.titotfp.wuwaid.debug`, versi `0.4.0-debug`; bisa berdampingan dengan release, tetapi bukan upgrade release. Jangan distribusikan signing debug atau jalankan dua installer bersamaan pada resource game yang sama.
 
 ### Profile debug
@@ -94,26 +98,34 @@ Gunakan APK debug ARM64 agar package release/data pengguna tetap dipertahankan. 
 
 Perangkat: Samsung SM-A525F, Android 14/API 34, user 0, ARM64; AxManager 2.0.1.r442/server 20100, UID shell 2000; game Global 3.7.0 dan rilis terjemahan `v3.7.1-id.1`.
 
+Pemeriksaan host/build diulang pada gabungan PR #9 dan base `c5f7c3b` setelah [PR #10](https://github.com/TitoTFP/WuwaIDMobile/pull/10) merged, memakai Rust 1.99.1. Bukti browser/perangkat tetap berasal dari QA sebelum integrasi CI; APK gabungan belum diuji pada perangkat.
+
 | Pemeriksaan | Hasil aktual |
 |---|---|
 | `npm test` | 52 tes lulus, termasuk type-check frontend/tes |
 | `npm run build` | Lulus |
 | Browser mobile 412×915 | Pilihan AxManager, grant, Apply UID, reload/persistensi, server mati, pergantian metode; tanpa overflow/error browser |
-| `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` | 43 tes lulus; 4 tes akses dijalankan ulang setelah penyesuaian format |
-| Build APK debug ARM64 | Lulus |
-| Android JVM `testUniversalDebugUnitTest` | 54 tes lulus; batas provider/Binder juga diuji pada SDK 24 dan 28 |
+| `cargo +1.99.1 test --manifest-path src-tauri/Cargo.toml --all-targets` | 43 tes lulus |
+| Build APK debug ARM64, JDK 17 | Lulus pada gabungan dengan base CI |
+| Android JVM `testUniversalDebugUnitTest`, JDK 21 | 54 tes lulus, tanpa failure/error/skip; batas provider/Binder juga diuji pada SDK 24 dan 28 |
 | Instrumentasi `ResourceFilesTest` | APK dibangun dan dipasang; belum dijalankan karena transport ADB terputus |
-| Rust format/Clippy `-D warnings` | Gagal; baseline rebuild `33cea8a` juga gagal saat diperiksa pada worktree terisolasi: format lintas modul, 79 error Clippy lib dan 3 lib-test |
+| Rust 1.99.1 format/Clippy all targets `-D warnings` | Lulus setelah PR #10; tanpa suppression |
+| Tauri/Wry desktop native IPC | Lulus: status AxManager tidak tersedia, diagnostics `desktop-unsupported`, probe/resource `not_checked`, install ditolak; bukan browser mock |
 
-APK debug akhir: 120.889.742 byte, SHA-256 `8737909ffe3e7c31f05a782d11f66d78d5000896a0a17cadaccbb838e45b105e`. Ini bukan bukti signing release atau kompatibilitas upgrade release.
+| APK debug ARM64 | Byte | SHA-256 |
+|---|---:|---|
+| QA perangkat sebelum integrasi CI; tetap dipakai untuk QA Root pengguna | 120889742 | `8737909ffe3e7c31f05a782d11f66d78d5000896a0a17cadaccbb838e45b105e` |
+| Gabungan PR #9 + base `c5f7c3b`; build/host saja | 120185686 | `53d12bbc058b8d84dc83a67763695e041ae7f1005a66c35f7b5997ea42cfeff3` |
 
-- Dengan `shizuku_server` tidak berjalan dan dashboard `shizuku.running=false`, install dan Apply UID berhasil; HUD game menampilkan `AxManager QA` dan teks quest Indonesia. Bukti install/Apply berasal dari build QA sebelum penambahan gate versi server; APK akhir membuktikan Reset UID, repair, uninstall, dan pemeriksaan lifecycle berikut.
+Kedua APK ini bukan bukti signing release atau kompatibilitas upgrade release.
+
+- Dengan `shizuku_server` tidak berjalan dan dashboard `shizuku.running=false`, install dan Apply UID berhasil; HUD game menampilkan `AxManager QA` dan teks quest Indonesia. Bukti install/Apply berasal dari build QA sebelum penambahan gate versi server; APK QA perangkat sebelum integrasi CI membuktikan Reset UID, repair, uninstall, dan pemeriksaan lifecycle berikut.
 - Reset mengembalikan HUD ke UID bawaan; terjemahan tetap berjalan. Uninstall melalui aplikasi mengembalikan baseline tanpa patch/UID kustom/jurnal tertunda. SHA-256 16 berkas resmi `Mount*.txt` sama sebelum/sesudah; ini bukan audit seluruh file game.
 - Deny/timeout dan pencabutan grant melalui halaman Privilege memblokir akses. Permintaan repair native setelah pencabutan ditolak; tidak ada fallback. Stop server memblokir akses; restart server tetap memerlukan koneksi ulang eksplisit. Pilihan AxManager bertahan setelah restart/update APK dan pergantian proses aplikasi.
-- Shizuku 13.5: dialog grant normal dan pembacaan storage privileged berhasil. Root: jalur penolakan/tidak tersedia dan isolasi grant diuji; operasi Root sukses belum teruji. Recovery akibat interupsi transaksi dicakup suite Rust, belum diinterupsi sengaja pada perangkat.
+- Shizuku 13.5: dialog grant normal dan pembacaan storage privileged berhasil. Root: jalur penolakan/tidak tersedia dan isolasi grant diuji; hasil operasi Root sukses dari QA pengguna belum diterima. Recovery akibat interupsi transaksi dicakup suite Rust, belum diinterupsi sengaja pada perangkat.
 - ADB USB dan discovery wireless hilang saat mengaktifkan kembali Shizuku, setelah baseline patch dipulihkan. Hasil aktivasi kembali Shizuku dan penghentian server Axeron setelah QA belum terkonfirmasi. APK release/data aplikasinya tidak diganti; konfigurasi wireless debugging tidak diubah.
 
-Merge masih menunggu penyelesaian gate CI baseline, QA perangkat yang belum selesai, review kontributor, dan persetujuan merge. Jangan menafsirkan build/mock sebagai pengganti bukti perangkat.
+Gate baseline CI diselesaikan terpisah melalui PR #10 dan telah merged ke rebuild. Merge PR #9 tetap mensyaratkan CI-nya lulus, QA perangkat yang belum selesai, review kontributor, dan persetujuan merge. Jangan menafsirkan build/mock sebagai pengganti bukti perangkat.
 
 ## Ukuran APK dan resource (pengukuran WM-29)
 

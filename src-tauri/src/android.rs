@@ -36,7 +36,10 @@ impl<R: Runtime> MobileBridge<R> {
         ) {
             return Err("Unsupported app control action".into());
         }
-        self.invoke("control", json!({ "action": action, "requestId": crate::trace::request_id() }))
+        self.invoke(
+            "control",
+            json!({ "action": action, "requestId": crate::trace::request_id() }),
+        )
     }
 
     fn invoke<T: serde::de::DeserializeOwned>(
@@ -74,7 +77,8 @@ impl<R: Runtime> Storage for MobileBridge<R> {
     fn stat_many(&self, paths: &[String]) -> PakResult<Vec<FileStat>> {
         let mut results = Vec::with_capacity(paths.len());
         for batch in paths.chunks(64) {
-            let rows: Vec<FileStat> = self.storage(json!({ "operation": "stat_many", "paths": batch }))?;
+            let rows: Vec<FileStat> =
+                self.storage(json!({ "operation": "stat_many", "paths": batch }))?;
             if rows.len() != batch.len() {
                 return Err("Android storage returned a partial stat batch".into());
             }

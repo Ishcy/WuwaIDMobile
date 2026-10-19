@@ -9,14 +9,14 @@ use serde::Serialize;
 use tauri::Emitter;
 use tauri::{AppHandle, Manager};
 
-use crate::pak::model::{AxManagerStatus, InstallStatus, PakResult, Release, ResourceLayout};
-#[cfg(not(target_os = "android"))]
-use crate::pak::model::GAME_PACKAGE;
-use crate::trace::{Request, Span};
-#[cfg(target_os = "android")]
-use crate::pak::{installer, release, uid};
 #[cfg(any(target_os = "android", test))]
 use crate::pak::model::DeviceProbe;
+#[cfg(not(target_os = "android"))]
+use crate::pak::model::GAME_PACKAGE;
+use crate::pak::model::{AxManagerStatus, InstallStatus, PakResult, Release, ResourceLayout};
+#[cfg(target_os = "android")]
+use crate::pak::{installer, release, uid};
+use crate::trace::{Request, Span};
 
 #[derive(Default)]
 pub struct NativeState {
@@ -136,14 +136,14 @@ fn physical_prerequisites(probe: &DeviceProbe) -> PakResult<()> {
         return Err("Aktifkan AxManager 2.0.1+ pada Android 8+ user utama terlebih dahulu.".into());
     }
     if !probe.access_granted {
-        return Err(
-            match probe.access_method.as_str() {
-                "root" => "Berikan izin root terlebih dahulu.",
-                "axmanager" => "Hubungkan storage melalui tombol Berikan izin AxManager terlebih dahulu.",
-                _ => "Jalankan Shizuku dan berikan izin terlebih dahulu.",
+        return Err(match probe.access_method.as_str() {
+            "root" => "Berikan izin root terlebih dahulu.",
+            "axmanager" => {
+                "Hubungkan storage melalui tombol Berikan izin AxManager terlebih dahulu."
             }
-            .into(),
-        );
+            _ => "Jalankan Shizuku dan berikan izin terlebih dahulu.",
+        }
+        .into());
     }
     if !probe.root_readable || !probe.root_writable {
         return Err("Metode akses terpilih tidak dapat membaca/menulis resource game. Periksa izin dan selesaikan unduhan resource di game.".into());
@@ -271,7 +271,10 @@ fn load_dashboard(
                 granted: probe.shizuku_granted,
             },
             axmanager: probe.axmanager,
-            access: Access { method: probe.access_method, granted: probe.access_granted },
+            access: Access {
+                method: probe.access_method,
+                granted: probe.access_granted,
+            },
             patch,
             uid: Uid {
                 original: "",
@@ -283,11 +286,15 @@ fn load_dashboard(
 }
 
 #[tauri::command]
-pub fn wuwa_trace_enabled() -> bool { cfg!(debug_assertions) }
+pub fn wuwa_trace_enabled() -> bool {
+    cfg!(debug_assertions)
+}
 
 #[tauri::command]
 pub fn wuwa_ui_trace(request_id: u64, event: String, frontend_us: u64) -> PakResult<()> {
-    if !cfg!(debug_assertions) { return Ok(()); }
+    if !cfg!(debug_assertions) {
+        return Ok(());
+    }
     let _request = Request::enter(request_id);
     match event.as_str() {
         "busy_start" => crate::trace::mark("ui.busy", "begin", frontend_us),
@@ -305,8 +312,8 @@ pub async fn wuwa_load(app: AppHandle, request_id: u64) -> PakResult<Dashboard> 
         let _load = Span::new("dashboard.load");
         load_dashboard(&app, true, None)
     })
-        .await
-        .map_err(|e| e.to_string())?
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -432,7 +439,6 @@ pub async fn wuwa_open_setup(app: AppHandle, target: String) -> PakResult<()> {
     .await
     .map_err(|e| e.to_string())?
 }
-
 
 #[cfg(test)]
 mod access_tests {

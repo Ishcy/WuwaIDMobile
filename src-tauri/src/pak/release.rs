@@ -1,6 +1,11 @@
+#[cfg(any(target_os = "android", test))]
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Write};
+use std::io::Read;
+#[cfg(any(target_os = "android", test))]
+use std::io::{self, Write};
+#[cfg(any(target_os = "android", test))]
 use std::path::{Path, PathBuf};
+#[cfg(any(target_os = "android", test))]
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::LazyLock;
 use std::time::Duration;
@@ -9,9 +14,12 @@ use reqwest::blocking::{Client, Response};
 use reqwest::redirect::Policy;
 use reqwest::StatusCode;
 use serde::Deserialize;
+#[cfg(any(target_os = "android", test))]
 use sha2::{Digest, Sha256};
 
-use super::model::{PakResult, Progress, ProgressCallback, Release};
+use super::model::{PakResult, Release};
+#[cfg(any(target_os = "android", test))]
+use super::model::{Progress, ProgressCallback};
 
 const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/TitoTFP/WuwaID/releases/latest";
 const GITHUB_HOST: &str = "github.com";
@@ -19,8 +27,10 @@ const RELEASE_ASSET_HOST: &str = "release-assets.githubusercontent.com";
 const USER_AGENT: &str = "WuwaIDMobile/0.1 (GitHub release downloader)";
 const MAX_METADATA_BYTES: usize = 4 * 1024 * 1024;
 const MAX_CHECKSUM_BYTES: usize = 1024 * 1024;
+#[cfg(any(target_os = "android", test))]
 const STREAM_BUFFER_BYTES: usize = 64 * 1024;
 const MAX_REDIRECTS: usize = 5;
+#[cfg(any(target_os = "android", test))]
 static STAGE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Deserialize)]
@@ -101,6 +111,7 @@ pub fn latest() -> PakResult<Release> {
     })
 }
 
+#[cfg(any(target_os = "android", test))]
 /// Holds the private-cache lock through installation/UID derivation, not just download.
 /// Dropping the file releases the OS lock, including after process death.
 #[derive(Debug)]
@@ -109,12 +120,14 @@ pub struct CachedPak {
     _lock: File,
 }
 
+#[cfg(any(target_os = "android", test))]
 impl CachedPak {
     pub fn path(&self) -> &Path {
         &self.path
     }
 }
 
+#[cfg(any(target_os = "android", test))]
 // Rust 1.97's File::try_lock returns Unsupported on Android. Use the kernel
 // lock directly; Linux deliberately shares this path so host tests exercise it.
 #[cfg(any(target_os = "android", target_os = "linux"))]
@@ -130,11 +143,13 @@ fn try_lock_cache(file: &File) -> io::Result<()> {
     }
 }
 
+#[cfg(any(target_os = "android", test))]
 #[cfg(not(any(target_os = "android", target_os = "linux")))]
 fn try_lock_cache(file: &File) -> io::Result<()> {
     file.try_lock().map_err(io::Error::from)
 }
 
+#[cfg(any(target_os = "android", test))]
 /// Download the release into the cache, verifying size and SHA-256 before publishing it.
 /// Retain only this verified source among reserved regular PAKs in the private cache.
 pub fn download(
@@ -431,6 +446,7 @@ fn checksum_for_asset(contents: &str, asset_name: &str) -> PakResult<String> {
     digest.ok_or_else(|| "Checksum SHA-256 untuk file PAK tidak ditemukan.".to_owned())
 }
 
+#[cfg(any(target_os = "android", test))]
 fn validate_release(release: &Release) -> PakResult<String> {
     let game_version = parse_game_version(&release.tag)?;
     if game_version != release.game_version {
@@ -515,6 +531,7 @@ fn normalize_sha256(digest: &str) -> PakResult<String> {
     Ok(value.to_ascii_lowercase())
 }
 
+#[cfg(any(target_os = "android", test))]
 fn cache_is_valid(path: &Path, expected_size: u64, expected_sha256: &str) -> io::Result<bool> {
     match fs::symlink_metadata(path) {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
@@ -528,6 +545,7 @@ fn cache_is_valid(path: &Path, expected_size: u64, expected_sha256: &str) -> io:
     }
 }
 
+#[cfg(any(target_os = "android", test))]
 fn verify_file(path: &Path, expected_size: u64, expected_sha256: &str) -> io::Result<bool> {
     let mut file = File::open(path)?;
     if file.metadata()?.len() != expected_size {
@@ -550,6 +568,7 @@ fn verify_file(path: &Path, expected_size: u64, expected_sha256: &str) -> io::Re
     Ok(total == expected_size && hex::encode(hasher.finalize()) == expected_sha256)
 }
 
+#[cfg(any(target_os = "android", test))]
 fn remove_cache_file(path: &Path) -> PakResult<()> {
     match fs::remove_file(path) {
         Ok(()) => Ok(()),
@@ -558,6 +577,7 @@ fn remove_cache_file(path: &Path) -> PakResult<()> {
     }
 }
 
+#[cfg(any(target_os = "android", test))]
 // This dedicated app-private directory reserves <release-tag>-<asset-name> PAKs.
 // Never evict the verified source, staging files, foreign names, symlinks or directories.
 fn retain_verified_source(cache_dir: &Path, retained: &Path) -> PakResult<()> {
@@ -596,6 +616,7 @@ fn retain_verified_source(cache_dir: &Path, retained: &Path) -> PakResult<()> {
     Ok(())
 }
 
+#[cfg(any(target_os = "android", test))]
 fn is_source_name(name: &str) -> bool {
     name.starts_with('v')
         && is_pak_name(name)
@@ -605,6 +626,7 @@ fn is_source_name(name: &str) -> bool {
         })
 }
 
+#[cfg(any(target_os = "android", test))]
 // All native users keep CachedPak alive until the installer finishes. Under its
 // exclusive lock, these generated scratch names cannot belong to an active operation.
 // Never inspect game storage, source PAKs, foreign names, or follow symlinks.
@@ -651,12 +673,14 @@ fn clean_abandoned_scratch(cache_dir: &Path) -> PakResult<()> {
     Ok(())
 }
 
+#[cfg(any(target_os = "android", test))]
 fn generated_suffix(name: &str, prefix: &str, suffix: &str) -> bool {
     name.strip_prefix(prefix)
         .and_then(|s| s.strip_suffix(suffix))
         .is_some_and(|s| s.len() == 6 && s.bytes().all(|b| b.is_ascii_alphanumeric()))
 }
 
+#[cfg(any(target_os = "android", test))]
 fn emit_progress(callback: &ProgressCallback<'_>, percent: u8, label: &str) {
     callback(Progress {
         percent,
@@ -664,12 +688,14 @@ fn emit_progress(callback: &ProgressCallback<'_>, percent: u8, label: &str) {
     });
 }
 
+#[cfg(any(target_os = "android", test))]
 struct StagedFile {
     path: PathBuf,
     file: Option<File>,
     published: bool,
 }
 
+#[cfg(any(target_os = "android", test))]
 impl StagedFile {
     fn create(directory: &Path, cache_path: &Path) -> PakResult<Self> {
         let filename = cache_path
@@ -712,6 +738,7 @@ impl StagedFile {
     }
 }
 
+#[cfg(any(target_os = "android", test))]
 impl Drop for StagedFile {
     fn drop(&mut self) {
         self.file.take();
@@ -768,7 +795,9 @@ mod tests {
             tag: "v3.7.1-id.1".into(),
             game_version: "3.7.1".into(),
             asset_name: "translation.pak".into(),
-            download_url: "https://github.com/TitoTFP/WuwaID/releases/download/v3.7.1-id.1/translation.pak".into(),
+            download_url:
+                "https://github.com/TitoTFP/WuwaID/releases/download/v3.7.1-id.1/translation.pak"
+                    .into(),
             html_url: "https://github.com/TitoTFP/WuwaID/releases/tag/v3.7.1-id.1".into(),
             size: bytes.len() as u64,
             sha256: sha256(bytes),
@@ -781,7 +810,9 @@ mod tests {
         let bytes = b"verified offline translation";
         let mut release = release_fixture(bytes);
         release.sha256 = format!("sha256:{}", release.sha256.to_ascii_uppercase());
-        let cache = root.path().join(format!("{}-{}", release.tag, release.asset_name));
+        let cache = root
+            .path()
+            .join(format!("{}-{}", release.tag, release.asset_name));
         fs::write(&cache, bytes).unwrap();
         let path = super::download(&release, root.path(), &|_| {}).unwrap();
         assert_eq!(path.path(), cache);
@@ -817,7 +848,9 @@ mod tests {
         assert!(super::download(&invalid, root.path(), &|_| {}).is_err());
         assert_eq!(fs::read(&old).unwrap(), b"previous source");
         assert_eq!(
-            super::download(&release, root.path(), &|_| {}).unwrap().path(),
+            super::download(&release, root.path(), &|_| {})
+                .unwrap()
+                .path(),
             current
         );
         assert_eq!(fs::read(&current).unwrap(), bytes);
@@ -837,7 +870,9 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let bytes = b"verified source";
         let release = release_fixture(bytes);
-        let current = root.path().join(format!("{}-{}", release.tag, release.asset_name));
+        let current = root
+            .path()
+            .join(format!("{}-{}", release.tag, release.asset_name));
         fs::write(&current, bytes).unwrap();
         let partial = root.path().join(".v3.6.0-id.1-translation.pak.part-123-0");
         let derived = root.path().join("uid-pak-Ab3dE6.pak");
@@ -912,7 +947,12 @@ mod tests {
             release.download_url = url.into();
             invalid.push(release);
         }
-        for name in ["../translation.pak", "other\\translation.pak", "translation.apk", "bad\n.pak"] {
+        for name in [
+            "../translation.pak",
+            "other\\translation.pak",
+            "translation.apk",
+            "bad\n.pak",
+        ] {
             let mut release = valid.clone();
             release.asset_name = name.into();
             invalid.push(release);
@@ -931,7 +971,10 @@ mod tests {
         invalid.push(wrong_page);
         let cache = root.path().join("not-yet-created");
         for release in invalid {
-            assert!(super::download(&release, &cache, &|_| {}).is_err(), "{release:?}");
+            assert!(
+                super::download(&release, &cache, &|_| {}).is_err(),
+                "{release:?}"
+            );
             assert!(!cache.exists());
             assert_eq!(fs::read(&untouched).unwrap(), b"keep");
         }
