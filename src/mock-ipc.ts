@@ -10,7 +10,7 @@ import {
   type Scenario,
 } from "./model";
 
-const STORAGE_KEY = "wuwaidmobile.mock-state.v5";
+const STORAGE_KEY = "wuwaidmobile.mock-state.v6";
 const GAME_VERSION = "3.7.0";
 const PACKAGE_NAME = "com.kurogame.wutheringwaves.global";
 
@@ -25,6 +25,7 @@ function seed(): Dashboard {
     game: { installed: true, version: GAME_VERSION, packageName: PACKAGE_NAME },
     resource: { ready: true, version: GAME_VERSION },
     shizuku: { running: true, granted: true },
+    axmanager: { installed: true, supported: true, running: true, version: "2.0.1" },
     access: { method: "shizuku", granted: true },
     patch: {
       installed: false,
@@ -44,6 +45,7 @@ function clone(dashboard: Dashboard): Dashboard {
     game: { ...dashboard.game },
     resource: { ...dashboard.resource },
     shizuku: { ...dashboard.shizuku },
+    axmanager: { ...dashboard.axmanager },
     access: { ...dashboard.access },
     patch: { ...dashboard.patch },
     uid: { ...dashboard.uid },
@@ -70,8 +72,13 @@ function validDashboard(value: unknown): value is Dashboard {
     !!d.shizuku &&
     typeof d.shizuku.running === "boolean" &&
     typeof d.shizuku.granted === "boolean" &&
+    !!d.axmanager &&
+    typeof d.axmanager.installed === "boolean" &&
+    typeof d.axmanager.supported === "boolean" &&
+    typeof d.axmanager.running === "boolean" &&
+    typeof d.axmanager.version === "string" &&
     !!d.access &&
-    (d.access.method === "shizuku" || d.access.method === "root") &&
+    (d.access.method === "shizuku" || d.access.method === "root" || d.access.method === "axmanager") &&
     typeof d.access.granted === "boolean" &&
     !!d.patch &&
     typeof d.patch.installed === "boolean" &&
@@ -124,6 +131,7 @@ function dependenciesReady(d: Dashboard): boolean {
     d.game.installed &&
     d.game.version === GAME_VERSION &&
     d.access.granted &&
+    (d.access.method !== "axmanager" || (d.axmanager.installed && d.axmanager.supported && d.axmanager.running)) &&
     d.resource.ready &&
     d.resource.version === GAME_VERSION
   );
@@ -173,6 +181,15 @@ function scenarioState(scenario: Scenario): Dashboard {
       next.shizuku.running = false;
       next.shizuku.granted = false;
       break;
+    case "axmanager_off":
+    case "axmanager_permission":
+    case "axmanager_ready":
+      next.access.method = "axmanager";
+      next.access.granted = scenario === "axmanager_ready";
+      next.axmanager.running = scenario !== "axmanager_off";
+      next.shizuku.running = false;
+      next.shizuku.granted = false;
+      break;
     case "recovery":
       next.patch.installed = true;
       next.patch.healthy = false;
@@ -201,10 +218,15 @@ async function perform(
       { percent: 58, label: "Memproses…" },
       { percent: 100, label: "Simulasi selesai" },
     ];
-    if (operation === "use_root" || operation === "use_shizuku" || operation === "request_root") {
+    if (operation === "use_root" || operation === "use_shizuku" || operation === "use_axmanager" || operation === "request_root") {
       if (operation === "request_root" && next.access.method !== "root")
         throw new Error("Pilih metode Root terlebih dahulu.");
+    } else if (operation === "request_axmanager") {
+      if (next.access.method !== "axmanager") throw new Error("Pilih metode AxManager terlebih dahulu.");
+      if (!next.axmanager.installed || !next.axmanager.supported || !next.axmanager.running)
+        throw new Error("Aktifkan AxManager 2.0.1+ terlebih dahulu.");
     } else if (operation === "request_permission") {
+      if (next.access.method !== "shizuku") throw new Error("Pilih metode Shizuku terlebih dahulu.");
       if (!next.shizuku.running) throw new Error("Shizuku belum aktif.");
     } else if (operation === "launch_game") {
       if (!next.game.installed)
@@ -304,6 +326,13 @@ async function perform(
       case "use_shizuku":
         next.access.method = "shizuku";
         next.access.granted = next.shizuku.running && next.shizuku.granted;
+        break;
+      case "use_axmanager":
+        next.access.method = "axmanager";
+        next.access.granted = false;
+        break;
+      case "request_axmanager":
+        next.access.granted = true;
         break;
       case "request_root":
         next.access.granted = true;

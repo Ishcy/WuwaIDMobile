@@ -12,6 +12,7 @@ function dashboard(): Dashboard {
       htmlUrl: "https://github.com/TitoTFP/WuwaID/releases/tag/v3.7.1-id.1", size: 100, sha256: "a".repeat(64) },
     uidAvailable: true, game: { installed: true, version: "3.7.0", packageName: "com.kurogame.wutheringwaves.global" },
     resource: { ready: true, version: "3.7.0" }, shizuku: { running: true, granted: true },
+    axmanager: { installed: false, supported: false, running: false, version: "" },
     access: { method: "shizuku", granted: true },
     patch: { installed: false, healthy: false, recoveryPending: false, legacyPending: false, version: "" },
     uid: { original: "123456789", custom: null }, lastChecked: 0,
@@ -64,6 +65,25 @@ describe("installation prerequisites", () => {
     d.access.method = "shizuku";
     expect(installationPrerequisites(d)).toBe(false);
   });
+  it("uses an explicit AxManager grant without Shizuku and rejects unavailable AxManager despite a stale grant", () => {
+    const d = dashboard();
+    d.access = { method: "axmanager", granted: true };
+    d.axmanager = { installed: true, supported: true, running: true, version: "2.0.1" };
+    d.shizuku = { running: false, granted: false };
+    expect(installationPrerequisites(d)).toBe(true);
+    expect(readiness(d).ready).toBe(true);
+    for (const field of ["installed", "supported", "running"] as const) {
+      d.axmanager[field] = false;
+      expect(installationPrerequisites(d)).toBe(false);
+      expect(readiness(d).ready).toBe(false);
+      d.axmanager[field] = true;
+    }
+    d.access.granted = false;
+    d.shizuku = { running: true, granted: true };
+    expect(installationPrerequisites(d)).toBe(false);
+    expect(readiness(d).ready).toBe(false);
+  });
+
 
   it.each(["platform", "game", "resource", "write", "blocker"])("requires the %s prerequisite", (missing) => {
     const d = dashboard();
@@ -176,7 +196,25 @@ describe("maintenance transitions", () => {
     d.access = { method: "root", granted: false };
     d.patch.installed = true;
     tools(state(d, "draft", true));
-    for (const name of ["request_root", "use_root", "use_shizuku", "refresh", "repair", "uninstall", "save-diagnostics", "share-diagnostics"])
+    for (const name of ["request_root", "use_root", "use_shizuku", "use_axmanager", "refresh", "repair", "uninstall", "save-diagnostics", "share-diagnostics"])
       expect(action(name).disabled).toBe(true);
+  });
+  it("does not enable AxManager permission or mutations while busy or when its server is unavailable", () => {
+    const d = dashboard();
+    d.access = { method: "axmanager", granted: false };
+    d.axmanager = { installed: true, supported: true, running: true, version: "2.0.1" };
+    tools(state(d, "draft", true));
+    for (const name of ["request_axmanager", "setup-axmanager", "use_root", "use_shizuku"])
+      expect(action(name).disabled).toBe(true);
+    tools(state(d));
+    expect(action("request_axmanager").disabled).toBe(false);
+    expect(action("use_axmanager").disabled).toBe(true);
+    d.axmanager.running = false;
+    tools(state(d));
+    expect(action("request_axmanager").disabled).toBe(true);
+    expect(action("setup-axmanager").disabled).toBe(false);
+    customize(state(d));
+    expect(document.querySelector<HTMLButtonElement>("#apply-uid")!.disabled).toBe(true);
+    expect(d.access.method).toBe("axmanager");
   });
 });

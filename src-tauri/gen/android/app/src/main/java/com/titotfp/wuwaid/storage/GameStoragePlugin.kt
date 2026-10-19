@@ -65,6 +65,7 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
   private val serviceLock = Any()
   private val destroyed = AtomicBoolean(false)
   private val rootSession = RootSession(activity)
+  private val axManagerSession = AxManagerSession(activity)
   private val accessPreferences = activity.getSharedPreferences("storage-access", Activity.MODE_PRIVATE)
   private var accessMethod = accessPreferences.getString("method", "shizuku") ?: "shizuku"
   @Volatile private var selectedGamePackage: String? = null
@@ -164,12 +165,23 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
         rootSession.request(args.requestId)
         null
       }
-      "use_root", "use_shizuku" -> dispatch(invoke) {
-        accessMethod = if (args.action == "use_root") "root" else "shizuku"
+      "request_axmanager" -> dispatch(invoke) {
+        check(accessMethod == "axmanager") { "Pilih metode AxManager terlebih dahulu." }
+        axManagerSession.request(args.requestId)
+        null
+      }
+      "use_root", "use_shizuku", "use_axmanager" -> dispatch(invoke) {
+        if (accessMethod == "axmanager") axManagerSession.disconnect()
+        accessMethod = when (args.action) {
+          "use_root" -> "root"
+          "use_axmanager" -> "axmanager"
+          else -> "shizuku"
+        }
         accessPreferences.edit().putString("method", accessMethod).apply()
         null
       }
       "open_shizuku" -> runOnUi(invoke) { launchPackage(SHIZUKU_PACKAGE) }
+      "open_axmanager" -> runOnUi(invoke) { launchPackage(AxManagerSession.PACKAGE) }
       "open_store" -> runOnUi(invoke) { openStore() }
       else -> invoke.reject("Unsupported app control action")
     }
@@ -194,6 +206,7 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
     pendingPermission.getAndSet(null)?.reject("Android storage plugin was destroyed")
     StorageTrace.mark(permissionRequestId, "permission.wait_user", "cancel")
     rootSession.close()
+    axManagerSession.close()
     Shizuku.removeRequestPermissionResultListener(permissionListener)
     Shizuku.removeBinderDeadListener(binderDeadListener)
     val connection = synchronized(serviceLock) {
@@ -216,6 +229,7 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
 
   private fun requestPermission(invoke: Invoke, id: Long) {
     try {
+      check(accessMethod == "shizuku") { "Pilih metode Shizuku terlebih dahulu." }
       requireShizuku()
       if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
         invoke.resolve()
@@ -270,7 +284,11 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
 
   private fun launchPackage(packageName: String) {
     val intent = activity.packageManager.getLaunchIntentForPackage(packageName)
-      ?: throw IllegalStateException("${if (packageName in GamePackages.supported) "Wuthering Waves" else "Shizuku"} is not installed")
+      ?: throw IllegalStateException("${when (packageName) {
+        in GamePackages.supported -> "Wuthering Waves"
+        AxManagerSession.PACKAGE -> "AxManager"
+        else -> "Shizuku"
+      }} is not installed")
     activity.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
   }
 
@@ -326,7 +344,13 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
     var rootReadable = false
     var rootWritable = false
     var storageError: String? = null
-    val accessGranted = if (accessMethod == "root") rootSession.granted() else shizukuGranted
+    val axmanager = axManagerSession.status(checkServer = accessMethod == "axmanager")
+    val accessGranted = when (accessMethod) {
+      "root" -> rootSession.granted()
+      "shizuku" -> shizukuGranted
+      "axmanager" -> axmanager["supported"] == true && axmanager["running"] == true && axManagerSession.granted()
+      else -> false
+    }
     if (accessGranted) {
       try {
         if (installed.isNotEmpty()) {
@@ -350,6 +374,7 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
       "gamePackage" to gamePackage,
       "shizukuRunning" to shizukuRunning,
       "shizukuGranted" to shizukuGranted,
+      "axmanager" to axmanager,
       "accessMethod" to accessMethod,
       "accessGranted" to accessGranted,
       "rootReadable" to rootReadable,
@@ -525,7 +550,12 @@ class GameStoragePlugin(private val activity: Activity) : Plugin(activity) {
     }
   }
   private fun connectedStorageService(): IStorageUserService {
-    val service = if (accessMethod == "root") rootSession.connected() else connectedUserService()
+    val service = when (accessMethod) {
+      "root" -> rootSession.connected()
+      "shizuku" -> connectedUserService()
+      "axmanager" -> axManagerSession.connected()
+      else -> throw IllegalStateException("Unknown storage access method")
+    }
     selectedGamePackage?.let { service.selectGame(it) }
     return service
   }

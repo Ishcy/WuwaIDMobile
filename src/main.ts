@@ -2,6 +2,7 @@ import { api } from "./ipc";
 import { diagnosticExportMessage } from "./diagnostics";
 import { appUpdateBusy, handleAppUpdate, initAppUpdates, renderAppUpdate } from "./app-update";
 import {
+  ACCESS_LABELS,
   CONTENT_VERSION,
   UID_MAX_LENGTH,
   compatibleGameVersion,
@@ -87,6 +88,10 @@ function renderHome() {
     primary = { action: "request_root", label: "Berikan izin root" };
   else if (d.access.method === "shizuku" && !d.shizuku.running)
     primary = { action: "setup-shizuku", label: "Buka Shizuku" };
+  else if (d.access.method === "axmanager" && (!d.axmanager.installed || !d.axmanager.supported || !d.axmanager.running))
+    primary = { action: "setup-axmanager", label: "Buka AxManager" };
+  else if (d.access.method === "axmanager" && !d.access.granted)
+    primary = { action: "request_axmanager", label: "Berikan izin AxManager" };
   else if (!d.access.granted)
     primary = { action: "request_permission", label: "Berikan izin Shizuku" };
   else if (d.patch.legacyPending || d.patch.recoveryPending)
@@ -121,14 +126,17 @@ function renderHome() {
       icon: "game",
     },
     {
-      name: d.access.method === "root" ? "Root" : "Shizuku",
+      name: ACCESS_LABELS[d.access.method],
       value: !d.platformSupported
         ? "Memerlukan Android"
         : d.access.granted
           ? "Aktif · diizinkan"
           : d.access.method === "root"
             ? "Menunggu izin root"
-            : d.shizuku.running ? "Menunggu izin" : "Belum aktif",
+            : d.access.method === "axmanager"
+              ? (!d.axmanager.installed ? "Belum terpasang" : !d.axmanager.supported ? "Versi/perangkat belum didukung"
+                : d.axmanager.running ? "Menunggu izin/koneksi" : "Server belum aktif")
+              : d.shizuku.running ? "Menunggu izin" : "Belum aktif",
       ok: d.access.granted,
       icon: "shield",
     },
@@ -272,6 +280,8 @@ async function operate(operation: Operation, uidText?: string) {
       request_root: "Akses root aktif.",
       use_root: "Metode Root dipilih. Berikan izin root untuk mengakses game.",
       use_shizuku: "Metode Shizuku dipilih.",
+      request_axmanager: "Storage AxManager terhubung.",
+      use_axmanager: "Metode AxManager dipilih. Hubungkan storage melalui tombol izin.",
     };
     notify(messages[operation]);
   });
@@ -323,10 +333,10 @@ app.addEventListener("click", async (event) => {
       if (result.status === "failed") throw new Error(message);
       notify(message);
     });
-  else if (action === "setup-game" || action === "setup-shizuku") {
+  else if (action === "setup-game" || action === "setup-shizuku" || action === "setup-axmanager") {
     if (state.dashboard.mode === "native") {
       await execute(async () => {
-        await api.openSetup(action === "setup-game" ? "game" : "shizuku");
+        await api.openSetup(action === "setup-game" ? "game" : action === "setup-axmanager" ? "axmanager" : "shizuku");
         notify(
           "Selesaikan pengaturan, lalu periksa ulang.",
         );
@@ -338,7 +348,7 @@ app.addEventListener("click", async (event) => {
     }
   } else if (
     action &&
-    ["install", "repair", "launch_game", "request_permission", "request_root", "use_root", "use_shizuku"].includes(action)
+    ["install", "repair", "launch_game", "request_permission", "request_root", "request_axmanager", "use_root", "use_shizuku", "use_axmanager"].includes(action)
   )
     await operate(action as Operation);
 });

@@ -25,10 +25,13 @@ impl<R: Runtime> MobileBridge<R> {
             action,
             "request_permission"
                 | "request_root"
+                | "request_axmanager"
                 | "use_root"
                 | "use_shizuku"
+                | "use_axmanager"
                 | "launch_game"
                 | "open_shizuku"
+                | "open_axmanager"
                 | "open_store"
         ) {
             return Err("Unsupported app control action".into());

@@ -95,7 +95,7 @@ export const api = {
       diagnosticHistory.record(`diagnostics:${action}`, result.message ?? "Ekspor gagal.", [activeUid]);
     return result;
   },
-  openSetup: (target: "game" | "shizuku") =>
+  openSetup: (target: "game" | "shizuku" | "axmanager") =>
     command<void>("wuwa_open_setup", { target }),
   appUpdate(action: "status" | "check" | "download" | "install", onProgress?: (progress: Progress) => void): Promise<AppUpdateStatus> {
     if (!native) return Promise.resolve({

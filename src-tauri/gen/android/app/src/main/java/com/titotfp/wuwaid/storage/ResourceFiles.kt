@@ -11,7 +11,7 @@ import java.security.MessageDigest
 import org.json.JSONArray
 import org.json.JSONObject
 
-// Constructed only in the privileged Shizuku or root service, never in the application process.
+// Constructed only in the privileged storage service, never in the application process.
 internal class ResourceFiles(private val gameFiles: File) {
   private var hashBuffer: ByteArray? = null
   // UserService serializes calls. Reuse engines, never their previous results.

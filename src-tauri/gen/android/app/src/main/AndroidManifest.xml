@@ -1,12 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <queries>
         <package android:name="com.kurogame.wutheringwaves.global" />
         <package android:name="com.kurogame.wutheringwaves.samsung" />
         <package android:name="moe.shizuku.privileged.api" />
+        <package android:name="frb.axeron.manager" />
     </queries>
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- AxManager is API 26+ only; existing Root/Shizuku support stays available on API 24–25. -->
+    <uses-sdk tools:overrideLibrary="frb.axeron.shell,frb.axeron.aidl,frb.axeron.shared" />
 
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />

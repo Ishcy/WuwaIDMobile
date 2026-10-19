@@ -136,9 +136,16 @@ dependencies {
     implementation("androidx.activity:activity-ktx:1.10.1")
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.lifecycle:lifecycle-process:2.10.0")
-    implementation("dev.rikka.shizuku:api:13.1.5")
-    implementation("dev.rikka.shizuku:provider:13.1.5")
+    // Axeron's AIDL includes the same Shizuku 13 wire contract; package it only once.
+    implementation("dev.rikka.shizuku:api:13.1.5") {
+        exclude(group = "dev.rikka.shizuku", module = "aidl")
+    }
+    implementation("dev.rikka.shizuku:provider:13.1.5") {
+        exclude(group = "dev.rikka.shizuku", module = "aidl")
+    }
     implementation("com.github.topjohnwu.libsu:service:6.0.0")
+    implementation("com.github.fahrez182.Axeron-API:axsh:2.0.1")
+    implementation("com.github.fahrez182.Axeron-API:aidl:2.0.1")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.17")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
