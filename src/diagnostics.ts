@@ -70,6 +70,7 @@ export function mockDiagnostics(d: Dashboard): DiagnosticReport {
       device: checked({ os: "browser", userAgent: navigator.userAgent, platform: navigator.platform }),
       probe: checked({ gameInstalled: d.game.installed, gameVersion: d.game.version, gamePackage: d.game.packageName,
         shizukuRunning: d.shizuku.running, shizukuGranted: d.shizuku.granted,
+        axmanager: { ...d.axmanager },
         accessMethod: d.access.method, accessGranted: d.access.granted,
         rootReadable: canRead && d.resource.ready, rootWritable: canRead && d.storageWritable, storageError: d.blocker }),
       resource,

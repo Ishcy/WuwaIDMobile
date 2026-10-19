@@ -9,7 +9,7 @@ use serde::Serialize;
 use tauri::Emitter;
 use tauri::{AppHandle, Manager};
 
-use crate::pak::model::{InstallStatus, PakResult, Release, ResourceLayout};
+use crate::pak::model::{AxManagerStatus, InstallStatus, PakResult, Release, ResourceLayout};
 #[cfg(not(target_os = "android"))]
 use crate::pak::model::GAME_PACKAGE;
 use crate::trace::{Request, Span};
@@ -52,6 +52,7 @@ pub struct Dashboard {
     game: Game,
     resource: Resource,
     shizuku: Shizuku,
+    axmanager: AxManagerStatus,
     access: Access,
     patch: InstallStatus,
     uid: Uid,
@@ -129,12 +130,20 @@ fn physical_prerequisites(probe: &DeviceProbe) -> PakResult<()> {
     if !probe.game_installed {
         return Err("Wuthering Waves Global atau Galaxy Store belum terpasang.".into());
     }
+    if probe.access_method == "axmanager"
+        && (!probe.axmanager.installed || !probe.axmanager.supported || !probe.axmanager.running)
+    {
+        return Err("Aktifkan AxManager 2.0.1+ pada Android 8+ user utama terlebih dahulu.".into());
+    }
     if !probe.access_granted {
-        return Err(if probe.access_method == "root" {
-            "Berikan izin root terlebih dahulu."
-        } else {
-            "Jalankan Shizuku dan berikan izin terlebih dahulu."
-        }.into());
+        return Err(
+            match probe.access_method.as_str() {
+                "root" => "Berikan izin root terlebih dahulu.",
+                "axmanager" => "Hubungkan storage melalui tombol Berikan izin AxManager terlebih dahulu.",
+                _ => "Jalankan Shizuku dan berikan izin terlebih dahulu.",
+            }
+            .into(),
+        );
     }
     if !probe.root_readable || !probe.root_writable {
         return Err("Metode akses terpilih tidak dapat membaca/menulis resource game. Periksa izin dan selesaikan unduhan resource di game.".into());
@@ -194,13 +203,14 @@ fn load_dashboard(
         Ok(Dashboard {
             mode: "native", platform_supported: false, storage_writable: false,
             blocker: Some(match release_error {
-                Some(error) => format!("Pemasangan .pak memerlukan Android dengan Shizuku atau root. Rilis latest belum dapat dibaca: {error}"),
-                None => "Pemasangan .pak memerlukan Android dengan Shizuku atau root. Desktop tidak menulis direktori game.".into(),
+                Some(error) => format!("Pemasangan .pak memerlukan Android dengan Shizuku, Root, atau AxManager. Rilis latest belum dapat dibaca: {error}"),
+                None => "Pemasangan .pak memerlukan Android dengan Shizuku, Root, atau AxManager. Desktop tidak menulis direktori game.".into(),
             }),
             release: selected_release, uid_available: false,
             game: Game { installed: false, version: String::new(), package_name: GAME_PACKAGE.into() },
             resource: Resource { ready: false, version: String::new() },
             shizuku: Shizuku { running: false, granted: false }, patch: empty_status(),
+            axmanager: AxManagerStatus::default(),
             access: Access { method: "shizuku".into(), granted: false },
             uid: Uid { original: "", custom: None }, last_checked: timestamp(),
         })
@@ -260,6 +270,7 @@ fn load_dashboard(
                 running: probe.shizuku_running,
                 granted: probe.shizuku_granted,
             },
+            axmanager: probe.axmanager,
             access: Access { method: probe.access_method, granted: probe.access_granted },
             patch,
             uid: Uid {
@@ -313,13 +324,14 @@ pub async fn wuwa_run(
         #[cfg(not(target_os = "android"))]
         {
             let _ = (&app, operation, uid_text);
-            Err("Pemasangan nyata memerlukan Android dengan Shizuku atau root.".into())
+            Err("Pemasangan nyata memerlukan Android dengan Shizuku, Root, atau AxManager.".into())
         }
         #[cfg(target_os = "android")]
         {
             let storage = bridge(&app);
             let completed = match operation.as_str() {
-                "request_permission" | "request_root" | "use_root" | "use_shizuku" | "launch_game" => {
+                "request_permission" | "request_root" | "request_axmanager" | "use_root"
+                | "use_shizuku" | "use_axmanager" | "launch_game" => {
                     storage.control(&operation)?;
                     None
                 }
@@ -404,13 +416,14 @@ pub async fn wuwa_open_setup(app: AppHandle, target: String) -> PakResult<()> {
         #[cfg(not(target_os = "android"))]
         {
             let _ = (&app, target);
-            Err("Pengaturan Shizuku/game hanya tersedia di Android.".into())
+            Err("Pengaturan metode akses/game hanya tersedia di Android.".into())
         }
         #[cfg(target_os = "android")]
         {
             let action = match target.as_str() {
                 "game" => "open_store",
                 "shizuku" => "open_shizuku",
+                "axmanager" => "open_axmanager",
                 _ => return Err("Target pengaturan tidak dikenal.".into()),
             };
             bridge(&app).control(action)
@@ -424,7 +437,7 @@ pub async fn wuwa_open_setup(app: AppHandle, target: String) -> PakResult<()> {
 #[cfg(test)]
 mod access_tests {
     use super::physical_prerequisites;
-    use crate::pak::model::DeviceProbe;
+    use crate::pak::model::{AxManagerStatus, DeviceProbe};
 
     fn root_probe() -> DeviceProbe {
         DeviceProbe {
@@ -433,6 +446,7 @@ mod access_tests {
             game_package: crate::pak::model::GAME_PACKAGE.into(),
             shizuku_running: false,
             shizuku_granted: false,
+            axmanager: AxManagerStatus::default(),
             access_method: "root".into(),
             access_granted: false,
             root_readable: true,
@@ -461,6 +475,36 @@ mod access_tests {
         assert!(physical_prerequisites(&probe).is_err());
         probe.access_granted = true;
         assert!(physical_prerequisites(&probe).is_ok());
+    }
+
+    #[test]
+    fn axmanager_requires_its_own_live_supported_session_without_shizuku() {
+        let mut probe = root_probe();
+        probe.access_method = "axmanager".into();
+        probe.axmanager = AxManagerStatus {
+            installed: true,
+            supported: true,
+            running: true,
+            version: "2.0.1".into(),
+        };
+        probe.shizuku_running = true;
+        probe.shizuku_granted = true;
+        assert!(physical_prerequisites(&probe).is_err());
+        probe.shizuku_running = false;
+        probe.shizuku_granted = false;
+        probe.access_granted = true;
+        assert!(physical_prerequisites(&probe).is_ok());
+        probe.axmanager.running = false;
+        assert!(physical_prerequisites(&probe).is_err());
+        probe.axmanager.running = true;
+        probe.axmanager.supported = false;
+        assert!(physical_prerequisites(&probe).is_err());
+        probe.axmanager.supported = true;
+        probe.axmanager.installed = false;
+        assert!(physical_prerequisites(&probe).is_err());
+        probe.axmanager.installed = true;
+        probe.root_writable = false;
+        assert!(physical_prerequisites(&probe).is_err());
     }
 
     #[test]

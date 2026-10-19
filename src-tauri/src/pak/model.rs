@@ -51,6 +51,14 @@ pub struct FileHashes {
     pub sha1: Option<String>,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct AxManagerStatus {
+    pub installed: bool,
+    pub supported: bool,
+    pub running: bool,
+    pub version: String,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceProbe {
@@ -59,6 +67,7 @@ pub struct DeviceProbe {
     pub game_package: String,
     pub shizuku_running: bool,
     pub shizuku_granted: bool,
+    pub axmanager: AxManagerStatus,
     pub access_method: String,
     pub access_granted: bool,
     pub root_readable: bool,

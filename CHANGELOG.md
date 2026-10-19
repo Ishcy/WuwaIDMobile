@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **AxManager / PR #9:** adapt @Ishcy's contribution to Tauri with explicit, persisted AxManager selection, setup/status/permission actions, diagnostics, and browser scenarios. Use the official Axeron `ShellService` SDK 2.0.1 to reuse the guarded storage service and transactional installer; do not require a running Shizuku server or AX-Permission Intercept. Require Android 8+, user 0, and AxManager 2.0.1+ without raising the app's minimum SDK. Recheck grants/server identity, release sessions on teardown, and never silently switch transports. [Setup, protocol, and QA](docs/android.md#akses-axmanager).
+
 - **UI copy:** remove the UID subtitle, app-updater note, access-method safety clause, diagnostics-share note, and uninstall reassurance; shorten the diagnostics-export note to “JSON teredaksi.”
 
 - **WM-30 — Android cache-lock regression:** replace Rust 1.97's unsupported Android `File::try_lock` with nonblocking libc `flock`, sharing the implementation with Linux host tests. Preserve exclusive lock lifetime and distinguish contention from other OS errors. Cross-process host smoke verifies exclusion, live scratch preservation, release after process death, and reacquisition. The user confirmed safe device operation after investigating a competing manual PAK; see the [UID conflict procedure](docs/android.md#konflik-pak-manual-dengan-uid-kustom).

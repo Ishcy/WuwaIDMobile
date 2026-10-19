@@ -226,6 +226,7 @@ mod tests {
             game_package: crate::pak::model::GAME_PACKAGE.into(),
             shizuku_running: false,
             shizuku_granted: false,
+            axmanager: crate::pak::model::AxManagerStatus::default(),
             access_method: "root".into(),
             access_granted: granted,
             root_readable: granted,

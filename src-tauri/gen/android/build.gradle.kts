@@ -15,7 +15,10 @@ allprojects {
         mavenCentral()
         exclusiveContent {
             forRepository { maven { url = uri("https://jitpack.io") } }
-            filter { includeGroup("com.github.topjohnwu.libsu") }
+            filter {
+                includeGroup("com.github.topjohnwu.libsu")
+                includeGroup("com.github.fahrez182.Axeron-API")
+            }
         }
     }
 }

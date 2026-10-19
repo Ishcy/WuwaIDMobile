@@ -9,6 +9,9 @@ export type Scenario =
   | "permission"
   | "root_permission"
   | "root_ready"
+  | "axmanager_off"
+  | "axmanager_permission"
+  | "axmanager_ready"
   | "legacy"
   | "recovery";
 export type Operation =
@@ -20,6 +23,8 @@ export type Operation =
   | "launch_game"
   | "request_permission"
   | "request_root"
+  | "request_axmanager"
+  | "use_axmanager"
   | "use_root"
   | "use_shizuku";
 export interface ReleaseInfo {
@@ -41,7 +46,8 @@ export interface Dashboard {
   game: { installed: boolean; version: string; packageName: string };
   resource: { ready: boolean; version: string };
   shizuku: { running: boolean; granted: boolean };
-  access: { method: "shizuku" | "root"; granted: boolean };
+  axmanager: { installed: boolean; supported: boolean; running: boolean; version: string };
+  access: { method: "shizuku" | "root" | "axmanager"; granted: boolean };
   patch: {
     installed: boolean;
     healthy: boolean;
@@ -53,6 +59,8 @@ export interface Dashboard {
   uid: { original: string; custom: string | null };
   lastChecked: string | number;
 }
+export const ACCESS_LABELS = { shizuku: "Shizuku", root: "Root", axmanager: "AxManager" } as const;
+
 export interface Progress {
   percent: number;
   label: string;
@@ -123,6 +131,7 @@ export function installationPrerequisites(d: Dashboard): boolean {
     d.game.installed &&
     compatibleGameVersion(d, d.game.version) &&
     d.access.granted &&
+    (d.access.method !== "axmanager" || (d.axmanager.installed && d.axmanager.supported && d.axmanager.running)) &&
     d.resource.ready &&
     compatibleGameVersion(d, d.resource.version)
   );
@@ -138,13 +147,22 @@ export function readiness(d: Dashboard): {
       label: "Memerlukan Android",
       detail:
         d.blocker ??
-        "Pemasangan memerlukan Android dengan Shizuku atau root.",
+        "Pemasangan memerlukan Android dengan Shizuku, Root, atau AxManager.",
     };
   if (!d.game.installed)
     return {
       ready: false,
       label: "Game belum ditemukan",
       detail: "Pasang Wuthering Waves Global atau Galaxy Store, lalu periksa ulang.",
+    };
+  if (d.access.method === "axmanager" && (!d.axmanager.installed || !d.axmanager.supported || !d.axmanager.running))
+    return {
+      ready: false,
+      label: !d.axmanager.installed ? "AxManager belum terpasang"
+        : !d.axmanager.supported ? "AxManager belum didukung" : "AxManager belum aktif",
+      detail: !d.axmanager.supported && d.axmanager.installed
+        ? "Memerlukan Android 8+, user utama, dan AxManager 2.0.1+. Pilih metode lain di Perawatan."
+        : "Pasang atau aktifkan server AxManager, lalu periksa ulang. Layanan Shizuku tidak diperlukan.",
     };
   if (d.access.method === "root" && !d.access.granted)
     return {
@@ -163,7 +181,8 @@ export function readiness(d: Dashboard): {
     return {
       ready: false,
       label: "Izin diperlukan",
-      detail: "Berikan izin Shizuku.",
+      detail: d.access.method === "axmanager" ? "Hubungkan storage melalui tombol Berikan izin AxManager."
+        : "Berikan izin Shizuku.",
     };
   if (d.resource.ready && (d.patch.legacyPending || d.patch.recoveryPending))
     return {
@@ -216,6 +235,6 @@ export function readiness(d: Dashboard): {
     ready: true,
     label: d.patch.installed ? "Terjemahan terpasang" : "Siap dipasang",
     detail:
-      `Game, ${d.access.method === "root" ? "root" : "Shizuku"}, dan resource siap.`,
+      `Game, ${ACCESS_LABELS[d.access.method]}, dan resource siap.`,
   };
 }

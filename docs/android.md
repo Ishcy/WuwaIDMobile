@@ -64,6 +64,57 @@ Output berada di `src-tauri/gen/android/app/build/outputs/apk/`. CI membangun AR
 
 `profile.dev.debug = 1` menyimpan informasi modul/baris dan backtrace, tetapi bukan detail penuh tipe/variabel lokal. Profile dev memakai `opt-level = 2`; debug assertions, overflow checks, dan trace tetap aktif. Atur `CARGO_PROFILE_DEV_DEBUG=2` untuk detail debugging Rust penuh. Hanya task `package*Debug` yang nonincremental; task build lain tetap incremental.
 
+## Akses AxManager
+
+Pilih **AxManager** secara eksplisit di Perawatan. Persyaratan: Android API 26+, user utama (user 0), dan aplikasi **serta server** AxManager 2.0.1/versionCode 20100 atau lebih baru. Versi yang diverifikasi adalah 2.0.1.r442. Setelah update APK AxManager, mulai ulang servernya; server lama yang masih berjalan ditolak. Android API 24–25 tetap memakai Root/Shizuku; minimum SDK aplikasi tidak dinaikkan. Profil sekunder/work profile dan AxManager 1.x tidak didukung oleh backend ini.
+
+Backend memakai [Axeron-API `axsh`/`aidl` 2.0.1](https://github.com/fahrez182/Axeron-API/tree/0955dc961791c299a97dba999fa470bc056f02f1), bukan provider `.axeron` atau salinan kontrak Binder parsial dari PR lama:
+
+- `Broker` meminta Binder melalui broadcast eksplisit `AxRuntime.REQUEST_BINDER` ke `frb.axeron.manager`. `attachApplication` memakai Bundle pada AIDL id 22; permission memakai id 19/20. ID AIDL ditambah `FIRST_CALL_TRANSACTION` pada wire. Tidak ada transaction ID/parcelable Axeron buatan aplikasi.
+- Provider `ShellServiceProvider` dari SDK hanya menerima UID root/shell dengan token bind acak yang masih outstanding; token dikirim melalui stdin, bukan argv. `AxManagerStorageService` memverifikasi UID 0/2000 sebelum menyediakan `StorageUserService`.
+- Metadata, streaming PFD, path/symlink guards, hashing, mutasi, dan installer transaksi tetap memakai implementasi yang sama. Tidak ada akses file Axeron alternatif atau perintah shell bebas dari frontend.
+- `request_axmanager` saja yang meminta izin dan mengikat service. Refresh tidak memunculkan dialog. Sesi memeriksa izin server lagi setiap akses service; Binder server yang berubah, grant dicabut, atau storage service mati memblokir operasi, bukan beralih ke Shizuku/Root.
+- Pilihan metode disimpan di `storage-access`; sesi privileged non-daemon dilepas ketika berganti dari AxManager atau aplikasi ditutup. Setelah membuka ulang aplikasi/service, gunakan tombol izin untuk menghubungkan kembali. Dialog permission AxManager 2.0.1 otomatis menolak setelah 10 detik.
+
+Tidak diperlukan aplikasi/server Shizuku ataupun AX-Permission Intercept untuk metode AxManager. Dependensi API/provider Shizuku tetap ada untuk metode Shizuku. AIDL SDK Axeron memuat kontrak Shizuku 13 yang sama; dependensi `dev.rikka.shizuku:aidl` dikecualikan agar kelas Binder tidak dikemas dua kali.
+
+Adaptasi mempertahankan kontribusi awal [@Ishcy melalui PR #9](https://github.com/TitoTFP/WuwaIDMobile/pull/9). Implementasi Tauri memakai jalur SDK resmi agar pemeriksaan storage yang lebih ketat tidak diganti oleh file client aplikasi lama.
+
+### QA AxManager
+
+Gunakan APK debug ARM64 agar package release/data pengguna tetap dipertahankan. Catat baseline patch/UID dan kembalikan setelah tes. Jangan memasang dua installer secara bersamaan pada resource yang sama.
+
+1. Jalankan server AxManager; matikan layanan Shizuku lewat menu manager, tanpa mengubah konfigurasi wireless debugging. Pastikan proses `shizuku_server` tidak ada dan dashboard `shizuku.running=false`.
+2. Pilih AxManager, uji deny/timeout, lalu grant melalui dialog normal atau halaman Privilege. Refresh tidak boleh meminta izin sendiri. Cabut izin dan pastikan akses/mutasi diblokir.
+3. Uji install, Apply/Reset UID, repair, uninstall, serta hasil terjemahan/UID di game. Bandingkan hash berkas resmi sebelum/sesudah. Jangan menulis langsung ke game melalui ADB.
+4. Uji restart aplikasi, stop/restart server, koneksi ulang eksplisit, dan pergantian Root/Shizuku/AxManager. Metode lain yang aktif tidak boleh membuka grant metode terpilih.
+5. Jalankan suite frontend/Rust/Android. Tes host Binder/provider mencakup API 24 dan 28; itu bukan bukti layanan AxManager dapat dipakai pada API 24–25. Root sukses memerlukan perangkat rooted; catat terpisah dari penolakan `su`.
+
+### Bukti QA port PR #9
+
+Perangkat: Samsung SM-A525F, Android 14/API 34, user 0, ARM64; AxManager 2.0.1.r442/server 20100, UID shell 2000; game Global 3.7.0 dan rilis terjemahan `v3.7.1-id.1`.
+
+| Pemeriksaan | Hasil aktual |
+|---|---|
+| `npm test` | 52 tes lulus, termasuk type-check frontend/tes |
+| `npm run build` | Lulus |
+| Browser mobile 412×915 | Pilihan AxManager, grant, Apply UID, reload/persistensi, server mati, pergantian metode; tanpa overflow/error browser |
+| `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` | 43 tes lulus; 4 tes akses dijalankan ulang setelah penyesuaian format |
+| Build APK debug ARM64 | Lulus |
+| Android JVM `testUniversalDebugUnitTest` | 54 tes lulus; batas provider/Binder juga diuji pada SDK 24 dan 28 |
+| Instrumentasi `ResourceFilesTest` | APK dibangun dan dipasang; belum dijalankan karena transport ADB terputus |
+| Rust format/Clippy `-D warnings` | Gagal; baseline rebuild `33cea8a` juga gagal saat diperiksa pada worktree terisolasi: format lintas modul, 79 error Clippy lib dan 3 lib-test |
+
+APK debug akhir: 120.889.742 byte, SHA-256 `8737909ffe3e7c31f05a782d11f66d78d5000896a0a17cadaccbb838e45b105e`. Ini bukan bukti signing release atau kompatibilitas upgrade release.
+
+- Dengan `shizuku_server` tidak berjalan dan dashboard `shizuku.running=false`, install dan Apply UID berhasil; HUD game menampilkan `AxManager QA` dan teks quest Indonesia. Bukti install/Apply berasal dari build QA sebelum penambahan gate versi server; APK akhir membuktikan Reset UID, repair, uninstall, dan pemeriksaan lifecycle berikut.
+- Reset mengembalikan HUD ke UID bawaan; terjemahan tetap berjalan. Uninstall melalui aplikasi mengembalikan baseline tanpa patch/UID kustom/jurnal tertunda. SHA-256 16 berkas resmi `Mount*.txt` sama sebelum/sesudah; ini bukan audit seluruh file game.
+- Deny/timeout dan pencabutan grant melalui halaman Privilege memblokir akses. Permintaan repair native setelah pencabutan ditolak; tidak ada fallback. Stop server memblokir akses; restart server tetap memerlukan koneksi ulang eksplisit. Pilihan AxManager bertahan setelah restart/update APK dan pergantian proses aplikasi.
+- Shizuku 13.5: dialog grant normal dan pembacaan storage privileged berhasil. Root: jalur penolakan/tidak tersedia dan isolasi grant diuji; operasi Root sukses belum teruji. Recovery akibat interupsi transaksi dicakup suite Rust, belum diinterupsi sengaja pada perangkat.
+- ADB USB dan discovery wireless hilang saat mengaktifkan kembali Shizuku, setelah baseline patch dipulihkan. Hasil aktivasi kembali Shizuku dan penghentian server Axeron setelah QA belum terkonfirmasi. APK release/data aplikasinya tidak diganti; konfigurasi wireless debugging tidak diubah.
+
+Merge masih menunggu penyelesaian gate CI baseline, QA perangkat yang belum selesai, review kontributor, dan persetujuan merge. Jangan menafsirkan build/mock sebagai pengganti bukti perangkat.
+
 ## Ukuran APK dan resource (pengukuran WM-29)
 
 | Pengukuran | Baseline WM-28 | WM-29 |
@@ -143,7 +194,7 @@ Tutup paksa game, pindahkan hanya PAK terjemahan manual yang dikenali ke backup 
 
 ### Prosedur QA storage perangkat
 
-1. Catat model/Android, filesystem, package game, metode Root/Shizuku, versi game/PAK, serta kondisi WebView yang sama. Bandingkan kedua APK tanpa uninstall/clear data. Catat ukuran aplikasi/data/cache dari Settings sebelum dan sesudah skenario; ukur puncak dengan tooling yang tersedia dan izin yang sudah diberikan, atau tandai belum terukur.
+1. Catat model/Android, filesystem, package game, metode Root/Shizuku/AxManager, versi game/PAK, serta kondisi WebView yang sama. Bandingkan kedua APK tanpa uninstall/clear data. Catat ukuran aplikasi/data/cache dari Settings sebelum dan sesudah skenario; ukur puncak dengan tooling yang tersedia dan izin yang sudah diberikan, atau tandai belum terukur.
 2. Ulangi install/update, UID Apply/Reset, repair/recovery, dan uninstall. Periksa hash file game bawaan sebelum/sesudah dan hasil UID/terjemahan di game. Backup/jurnal recovery tidak boleh dibersihkan sebagai cache.
 3. Putuskan jaringan atau hentikan proses saat unduh PAK/UID; setelah membuka ulang, jalankan operasi cache berikutnya. Partial/UID scratch yang namanya direservasi harus hilang; source terverifikasi dan file asing tetap ada. Kegagalan staging/commit harus tetap dapat diperbaiki lewat recovery.
 4. Jalankan [QA updater](#qa-updater-wajib), termasuk versi stabil resmi yang lebih tinggi, installer batal/izin ditolak, retry offline dari APK terverifikasi, dan restart setelah update. Partial/yatim dibersihkan saat restore; APK ready tidak dihapus hanya karena installer batal atau pemeriksaan jaringan gagal.

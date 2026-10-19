@@ -170,7 +170,7 @@ class StorageUserService : IStorageUserService.Stub() {
     outputExecutor.shutdownNow()
   }
 
-  // The root adapter closes workers through its own lifecycle, without the Shizuku exit command.
+  // Bound-service adapters close workers through their own lifecycle, without the Shizuku exit command.
   override fun destroy() {
     close()
     System.exit(0)

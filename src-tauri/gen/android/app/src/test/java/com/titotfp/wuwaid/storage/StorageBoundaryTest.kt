@@ -1,6 +1,8 @@
 package com.titotfp.wuwaid.storage
 
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** Pure argument boundaries; no Android filesystem, shell, su, or Shizuku is executed. */
@@ -67,5 +69,14 @@ class StorageBoundaryTest {
     for (packageName in listOf("", "com.kurogame.wutheringwaves.global.debug", "../outside", "com.example.game")) {
       assertThrows(packageName, IllegalArgumentException::class.java) { GamePackages.resources(packageName) }
     }
+  }
+
+  @Test fun axManagerRequiresSupportedAndroidPrimaryUserAndBothAppAndServerVersions() {
+    assertTrue(isAxManagerCompatible(26, 0, 20100, 20100))
+    assertTrue(isAxManagerCompatible(34, 0, 20101, 20100))
+    assertFalse(isAxManagerCompatible(25, 0, 20100, 20100))
+    assertFalse(isAxManagerCompatible(34, 10, 20100, 20100))
+    assertFalse(isAxManagerCompatible(34, 0, 20099, 20100))
+    assertFalse(isAxManagerCompatible(34, 0, 20100, 20099))
   }
 }

@@ -6,7 +6,7 @@ Pendamping lokalisasi **Wuthering Waves ke Bahasa Indonesia**, dibuat dengan Tau
 
 - **Beranda:** status game, metode akses, status terjemahan, dan pemasangan atau perbaikan terjemahan.
 - **Kustomisasi:** terapkan teks UID kustom atau pulihkan teks bawaan. Ini mengubah teks tampilan game, bukan UID akun.
-- **Perawatan:** pilih Shizuku atau root, periksa ulang, pulihkan transaksi, kelola pembaruan aplikasi, dan simpan/bagikan diagnostik.
+- **Perawatan:** pilih Shizuku, Root, atau AxManager, periksa ulang, pulihkan transaksi, kelola pembaruan aplikasi, dan simpan/bagikan diagnostik.
 - Navigasi horizontal di desktop dan dock bawah di Android. Tema **Terang / Gelap / Sistem** disimpan lokal; Sistem mengikuti perubahan tema perangkat. Pergantian tema tidak menghapus isian atau menghentikan operasi.
 - Progres diperbarui tanpa membangun ulang navigasi. Animasi 140–180 ms mengikuti `prefers-reduced-motion`.
 
@@ -17,7 +17,9 @@ Pendamping lokalisasi **Wuthering Waves ke Bahasa Indonesia**, dibuat dengan Tau
 1. Pasang **Wuthering Waves Global** (`com.kurogame.wutheringwaves.global`) atau **Galaxy Store** (`com.kurogame.wutheringwaves.samsung`), lalu selesaikan unduhan resource game termasuk paket bahasa Inggris.
 2. Di **Perawatan**, pilih akses:
    - **Shizuku** (default): [pasang dan jalankan Shizuku](https://shizuku.rikka.app/), lalu pilih **Berikan izin Shizuku**. Server Shizuku API 12 atau lebih baru diperlukan.
-   - **Root**: pilih **Gunakan Root**, lalu **Berikan izin root** dan setujui permintaan pada pengelola root. Membuka aplikasi/refresh tidak menjalankan `su`. Pilihan metode disimpan, tetapi grant tidak dianggap permanen; minta izin lagi setelah aplikasi/service dimulai ulang (pengelola root dapat mengingat keputusan). Tidak ada fallback otomatis, dan pergantian metode diblokir selama operasi.
+   - **Root**: pilih **Gunakan Root**, lalu **Berikan izin root** dan setujui permintaan pada pengelola root. Membuka aplikasi/refresh tidak menjalankan `su`.
+   - **AxManager**: [pasang AxManager 2.0.1+](https://github.com/fahrez182/AxManager/releases), aktifkan servernya, pilih **Gunakan AxManager**, lalu **Berikan izin AxManager**. Memerlukan Android 8+ pada user utama. Layanan Shizuku dan AX-Permission Intercept tidak diperlukan. Dialog AxManager otomatis menolak setelah 10 detik; jika terlewat, coba lagi.
+   Pilihan metode disimpan, tetapi sesi Root/AxManager harus dihubungkan ulang lewat tombol izin setelah aplikasi/service dimulai ulang. Tidak ada fallback otomatis, dan pergantian metode diblokir selama operasi. Detail kontrak dan batas kompatibilitas ada di [panduan AxManager](docs/android.md#akses-axmanager).
 3. Periksa perangkat, lalu pilih **Pasang terjemahan**. Game dihentikan sebelum perubahan berkas.
 
 Rilis PAK diambil dinamis dari [rilis stabil terbaru WuwaID](https://github.com/TitoTFP/WuwaID/releases/latest), bukan dari rilis aplikasi; metadata tag, aset, ukuran, dan hash tidak dibundel. Unduhan HTTPS diverifikasi dengan ukuran dan SHA-256; cache pakai ulang juga diverifikasi. Rilis dipasang hanya jika lini game/resource cocok, memakai pasangan PAK/signature resmi pada resource materialized (prefer `Lang_en`). Pemasangan standar menyalin PAK utuh; UID kustom mengubah salinan privat lalu mengemas ulang PAK. Reset memulihkan PAK asli.
@@ -51,7 +53,7 @@ APK diperiksa terhadap nama aset, ukuran dan SHA-256, package `com.titotfp.wuwai
 Diagnostik `schemaVersion: 1` berisi bagian `application`, `device`, `probe`, `resource`, `patch`, dan `release`; tiap bagian berstatus `ok`, `error`, atau `not_checked` dengan `data`, `error`, dan `reason`. Bagian yang gagal/tidak diperiksa memakai `data: null`, bukan klaim bahwa terjemahan tidak terpasang. UID kustom tidak disertakan; `uidCustomized` hanya dicatat setelah inspeksi pemasangan berhasil, dan error yang mengetahui nilainya meredaksi teks UID. History hanya untuk sesi frontend, maksimal 20 error dengan pesan maksimal 1024 unit UTF-16 setelah redaksi, dan hilang saat frontend dimuat ulang.
 
 Android **Simpan** baru berstatus `saved` setelah tulis, flush, dan tutup berhasil; batal dan gagal dibedakan. **Bagikan** membuka chooser read-only, tetapi `share_opened` bukan bukti laporan diterima. Laporan tidak berisi logcat/trace atau payload PAK dan tidak diunggah otomatis. Di browser, Simpan hanya mengonfirmasi unduhan dimulai; Bagikan memakai Web Share, atau gagal bila tidak tersedia. Ekspor native hanya tersedia di Android; desktop menandai status game `not_checked`.
-Browser memiliki 11 skenario simulasi: siap, terpasang, game tidak ditemukan, versi tidak didukung, resource belum siap, Shizuku mati/izin belum diberikan, root menunggu izin/siap tanpa Shizuku, pemulihan tertunda, dan instalasi sebelum Tauri. Semua akses, instalasi, UID, penghapusan, dan diagnostik adalah mock—tanpa root nyata, penulisan game, atau peluncuran game. UID `900123456`, versi `3.7.0`, dan konten `3.7.0-R2` adalah data contoh. State memakai `wuwaidmobile.mock-state.v5`; memilih skenario mereset data contoh dan UID. Desktop Tauri tidak memasang PAK Android dan menampilkan batas platform.
+Browser memiliki 14 skenario simulasi: siap, terpasang, game tidak ditemukan, versi tidak didukung, resource belum siap, Shizuku mati/izin belum diberikan, Root menunggu izin/siap tanpa Shizuku, AxManager mati/menunggu izin/siap tanpa Shizuku, pemulihan tertunda, dan instalasi sebelum Tauri. Semua akses, instalasi, UID, penghapusan, dan diagnostik adalah mock—tanpa akses privileged nyata, penulisan game, atau peluncuran game. UID `900123456`, versi `3.7.0`, dan konten `3.7.0-R2` adalah data contoh. State memakai `wuwaidmobile.mock-state.v6`; memilih skenario mereset data contoh dan UID. Desktop Tauri tidak memasang PAK Android dan menampilkan batas platform.
 
 ## Browser dan pengembangan
 
@@ -92,13 +94,13 @@ State frontend didefinisikan di `src/model.ts`; implementasi installer/downloade
 | `wuwa_load` | `requestId` | `Dashboard` |
 | `wuwa_set_scenario` | `scenario` | `Dashboard` (browser saja) |
 | `wuwa_run` | `requestId`, `operation`, `uidText?` (`apply_uid`) | `Dashboard` |
-| `wuwa_open_setup` | `target`: `game` / `shizuku` | — (native) |
+| `wuwa_open_setup` | `target`: `game` / `shizuku` / `axmanager` | — (native) |
 | `wuwa_diagnostics` | `requestId` | `DiagnosticReport` (`schemaVersion`, `sections`, `privacy`, `errors`) |
 | `wuwa_export_diagnostics` | `action`: `save` / `share`; `content`: JSON teredaksi | `saved` / `cancelled` / `failed` / `share_opened` (Android) |
 | `wuwa_trace_enabled` | — | Status recording debug native (`boolean`) |
 | `wuwa_ui_trace` | `requestId`, `event`, `frontendUs` | Event tetap; recording dinonaktifkan di release native |
 
-Operasi native: `install`, `repair`, `uninstall`, `request_permission`, `request_root`, `use_root`, `use_shizuku`, `launch_game`, `apply_uid`, `restore_uid`. Status Shizuku (`shizuku`) terpisah dari metode akses terpilih (`access.method`, `access.granted`); kesiapan memakai grant metode terpilih. `game.packageName` berisi paket aktif. `patch.legacyPending` menandai instalasi sebelum Tauri; `repair` memilih migrasi offline atau pemulihan jurnal sesuai status. Mutasi bersamaan ditolak. `src/ipc.ts` membuat correlation ID; caller tidak perlu membuatnya. Detail trace dan analisis performa ada di [`docs/android-traces.md`](docs/android-traces.md).
+Operasi native: `install`, `repair`, `uninstall`, `request_permission`, `request_root`, `request_axmanager`, `use_root`, `use_shizuku`, `use_axmanager`, `launch_game`, `apply_uid`, `restore_uid`. Status Shizuku (`shizuku`) dan AxManager (`axmanager`: `installed`, `supported`, `running`, `version`) terpisah dari metode akses terpilih (`access.method`, `access.granted`); kesiapan memakai grant metode terpilih. Status server AxManager diperiksa saat metodenya dipilih, tanpa meminta izin. `game.packageName` berisi paket aktif. `patch.legacyPending` menandai instalasi sebelum Tauri; `repair` memilih migrasi offline atau pemulihan jurnal sesuai status. Mutasi bersamaan ditolak. `src/ipc.ts` membuat correlation ID; caller tidak perlu membuatnya. Detail trace dan analisis performa ada di [`docs/android-traces.md`](docs/android-traces.md).
 
 ## Referensi
 

@@ -23,8 +23,16 @@ impl<R: Runtime> MobileBridge<R> {
     pub fn control(&self, action: &str) -> PakResult<()> {
         if !matches!(
             action,
-            "request_permission" | "request_root" | "use_root" | "use_shizuku"
-                | "launch_game" | "open_shizuku" | "open_store"
+            "request_permission"
+                | "request_root"
+                | "request_axmanager"
+                | "use_root"
+                | "use_shizuku"
+                | "use_axmanager"
+                | "launch_game"
+                | "open_shizuku"
+                | "open_axmanager"
+                | "open_store"
         ) {
             return Err("Unsupported app control action".into());
         }
