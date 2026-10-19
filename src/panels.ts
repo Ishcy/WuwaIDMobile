@@ -47,7 +47,7 @@ export function renderCustomize(state: UiState): string {
     draft !== current;
   const gate = !status.ready ? status.detail : "";
 
-  return `<section class="page-heading"><h1>Kustomisasi</h1><p>${d.mode === "mock" ? "Simulasi tampilan UID." : "Tampilan UID."} UID akun tetap.</p></section>
+  return `<section class="page-heading"><h1>Kustomisasi</h1></section>
       <section class="card uid-editor" aria-labelledby="uid-title">
         <div class="card-header"><h2 id="uid-title">UID kustom</h2>${icon("customize")}</div>
         ${gate ? `<p class="muted uid-gate">${escapeHtml(gate)}</p>` : ""}
@@ -130,7 +130,7 @@ export function renderTools(state: UiState): string {
     },
     {
       name: "Simpan diagnostik",
-      detail: "JSON teredaksi; tanpa teks UID kustom.",
+      detail: "JSON teredaksi.",
       action: "save-diagnostics",
       label: "Simpan",
       disabled: state.busy,
@@ -138,7 +138,7 @@ export function renderTools(state: UiState): string {
     },
     {
       name: "Bagikan diagnostik",
-      detail: "Buka dialog berbagi; bukan konfirmasi pengiriman.",
+      detail: undefined,
       action: "share-diagnostics",
       label: "Bagikan",
       disabled: state.busy,
@@ -146,8 +146,7 @@ export function renderTools(state: UiState): string {
     },
     {
       name: "Hapus terjemahan",
-      detail:
-        "File game asli tetap utuh.",
+      detail: undefined,
       action: "uninstall",
       label: "Hapus",
       disabled: state.busy || !d.patch.installed || !canUninstall,
@@ -156,14 +155,14 @@ export function renderTools(state: UiState): string {
   ]
     .map(
       (row) =>
-        `<div class="tool-row ${row.action === "uninstall" ? "tool-destructive" : ""}"><span class="tool-icon">${icon(row.icon)}</span><div class="tool-copy"><h3>${row.name}</h3><p class="muted">${row.detail}</p></div>${button(row.action, row.label, row.disabled, row.action === "uninstall" ? "btn btn-danger" : "btn btn-secondary")}</div>`,
+        `<div class="tool-row ${row.action === "uninstall" ? "tool-destructive" : ""}"><span class="tool-icon">${icon(row.icon)}</span><div class="tool-copy"><h3>${row.name}</h3>${row.detail ? `<p class="muted">${row.detail}</p>` : ""}</div>${button(row.action, row.label, row.disabled, row.action === "uninstall" ? "btn btn-danger" : "btn btn-secondary")}</div>`,
     )
     .join("");
   return `<section class="page-heading"><h1>Perawatan</h1></section>
     <section class="health-banner" aria-label="Status pemasangan"><span class="health-icon ${status.ready ? "healthy" : "needs-attention"}">${icon(status.ready ? "shield" : "info")}</span><div><h2>${escapeHtml(status.label)}</h2>${!status.ready ? `<p class="muted">${escapeHtml(status.detail)}</p>` : ""}</div></section>
     ${d.platformSupported ? `<section class="card access-card" aria-labelledby="access-title">
       <div class="card-header"><h2 id="access-title">Metode akses</h2>${icon("shield")}</div>
-      <p class="muted">${d.access.method === "root" ? "Root langsung melalui su. Shizuku tidak diperlukan." : "Shizuku untuk perangkat tanpa akses root."} Pergantian metode tidak mengubah file game.</p>
+      <p class="muted">${d.access.method === "root" ? "Root langsung melalui su. Shizuku tidak diperlukan." : "Shizuku untuk perangkat tanpa akses root."}</p>
       <div class="actions">${button("use_shizuku", "Gunakan Shizuku", state.busy || d.access.method === "shizuku")}${button("use_root", "Gunakan Root", state.busy || d.access.method === "root")}</div>
       ${d.access.method === "root" ? `<p class="muted">Izin hanya diminta saat tombol berikut ditekan. Jika su tidak tersedia atau ditolak, pilih Shizuku.</p><div class="actions">${button("request_root", "Berikan izin root", state.busy || d.access.granted)}</div>` : ""}
     </section>` : ""}

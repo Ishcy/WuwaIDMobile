@@ -91,6 +91,5 @@ export function renderAppUpdate(gameBusy: boolean, details: boolean): string {
       ${supported && version ? `<button class="btn btn-primary" data-action="${status?.ready ? "app-update-install" : "app-update-download"}" ${disabled}>${icon(status?.ready ? "external" : "download")} ${status?.ready ? "Pasang update" : "Unduh APK"}</button>` : ""}
     </div>
     ${progress ? `<div class="progress-card" id="app-update-progress" role="status" aria-live="polite"><div><strong>${esc(progress.label)}</strong><span>${progress.percent}%</span></div><div class="progress-track" role="progressbar" aria-label="Progres pembaruan aplikasi" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress.percent}"><span class="progress-fill" style="transform: scaleX(${progress.percent / 100})"></span></div></div>` : ""}
-    <p class="muted app-update-note">Update aplikasi, bukan terjemahan PAK. Pemasangan meminta konfirmasi Android; tidak memerlukan root atau Shizuku.</p>
   </section>`;
 }

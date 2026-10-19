@@ -156,7 +156,6 @@ svg, .icon { flex-shrink: 0; }
 .app-update-card { margin: 24px 0; }
 .app-update-card .actions { margin-top: 16px; }
 .app-update-card .muted, .app-update-card p + p { margin-top: 8px; overflow-wrap: anywhere; }
-.app-update-note { font-size: 12px; }
 .app-update-error { color: var(--danger); margin-top: 12px; overflow-wrap: anywhere; }
 .tool-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-bottom: 24px; }
 .tool-row { display: flex; flex-direction: column; align-items: flex-start; padding: 22px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; gap: 18px; }
