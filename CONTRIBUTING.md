@@ -2,7 +2,7 @@
 
 ## Persiapan
 
-Jalankan `npm ci` untuk memasang dependensi yang terkunci.
+Gunakan Node.js 24 dan npm; jalankan `npm ci` untuk memasang dependensi yang terkunci. Native memerlukan Rust stable melalui rustup dan dependensi sistem [Tauri](https://v2.tauri.app/start/prerequisites/). Setup Android ada di [panduan Android](docs/android.md).
 
 ## Sebelum pull request
 
@@ -22,3 +22,31 @@ Untuk perubahan Android, uji di emulator/perangkat atau buat APK debug sesuai [p
 ## Jangan commit
 
 Jangan commit kredensial signing, `local.properties`, keluaran build, atau `node_modules`. Tetap lacak `src-tauri/gen/android/`: direktori itu berisi proyek native yang dikonfigurasi untuk aplikasi ini.
+
+## Arsitektur dan UI
+
+- `src/model.ts` mendefinisikan state; UI di `src/main.ts` memanggil wrapper `src/ipc.ts`. Orkestrasi native ada di `src-tauri/src/native.rs`, installer/downloader di `src-tauri/src/pak/`, dan bridge Android di `src-tauri/src/android.rs`.
+- Navigasi horizontal di desktop dan dock bawah di Android. Tema Terang/Gelap/Sistem disimpan lokal; perubahan tema tidak menghapus draft atau menghentikan operasi. Progres tidak membangun ulang navigasi; animasi 140–180 ms mengikuti `prefers-reduced-motion`.
+- Browser adalah simulasi, bukan bukti akses privileged atau hasil game. Ada 14 skenario: siap, terpasang, game tidak ditemukan, versi tidak didukung, resource belum siap, Shizuku mati/menunggu izin, Root menunggu izin/siap tanpa Shizuku, AxManager mati/menunggu izin/siap tanpa Shizuku, recovery, dan instalasi sebelum Tauri.
+- State browser memakai `wuwaidmobile.mock-state.v6`; memilih skenario mereset data contoh dan UID. UID `900123456`, versi `3.7.0`, dan konten `3.7.0-R2` hanyalah contoh. Desktop native menyediakan metadata rilis tetapi tidak menulis game; status game ditandai `not_checked`.
+
+## Kontrak IPC
+
+`src/ipc.ts` membuat correlation ID; caller tidak perlu membuatnya sendiri. Jangan memanggil command native ad hoc dari UI.
+
+| Perintah | Argumen | Hasil |
+|---|---|---|
+| `wuwa_load` | `requestId` | `Dashboard` |
+| `wuwa_set_scenario` | `scenario` | `Dashboard` (browser saja) |
+| `wuwa_run` | `requestId`, `operation`, `uidText?` (`apply_uid`) | `Dashboard` |
+| `wuwa_open_setup` | `target`: `game` / `shizuku` / `axmanager` | — (native) |
+| `wuwa_diagnostics` | `requestId` | `DiagnosticReport` |
+| `wuwa_export_diagnostics` | `action`: `save` / `share`; `content`: JSON teredaksi | `saved` / `cancelled` / `failed` / `share_opened` (Android) |
+| `wuwa_trace_enabled` | — | Status recording debug native (`boolean`) |
+| `wuwa_ui_trace` | `requestId`, `event`, `frontendUs` | Event tetap; recorder dinonaktifkan di release native |
+
+Operasi native: `install`, `repair`, `uninstall`, `request_permission`, `request_root`, `request_axmanager`, `use_root`, `use_shizuku`, `use_axmanager`, `launch_game`, `apply_uid`, `restore_uid`. Mutasi bersamaan ditolak.
+
+Status `shizuku` dan `axmanager` (`installed`, `supported`, `running`, `version`) terpisah dari pilihan `access.method` dan `access.granted`; kesiapan memakai grant metode terpilih. Server AxManager diperiksa saat metodenya dipilih, tanpa meminta izin. `game.packageName` adalah paket aktif; `patch.legacyPending` menandai instalasi sebelum Tauri. Operasi `repair` memilih migrasi offline atau pemulihan jurnal sesuai status.
+
+Lihat [format dan privasi diagnostik](docs/android.md#diagnostik-dan-ekspor) serta [marker debug dan analisis trace](docs/android-traces.md#marker-debug) untuk kontrak laporan dan recording.

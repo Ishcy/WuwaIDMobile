@@ -68,6 +68,44 @@ Output berada di `src-tauri/gen/android/app/build/outputs/apk/`. CI membangun AR
 
 `profile.dev.debug = 1` menyimpan informasi modul/baris dan backtrace, tetapi bukan detail penuh tipe/variabel lokal. Profile dev memakai `opt-level = 2`; debug assertions, overflow checks, dan trace tetap aktif. Atur `CARGO_PROFILE_DEV_DEBUG=2` untuk detail debugging Rust penuh. Hanya task `package*Debug` yang nonincremental; task build lain tetap incremental.
 
+## Penggunaan dan kontrak instalasi
+
+### Instalasi dan migrasi
+
+1. Pasang Global (`com.kurogame.wutheringwaves.global`) atau Galaxy Store (`com.kurogame.wutheringwaves.samsung`); selesaikan resource game dan paket bahasa Inggris.
+2. Pilih metode di **Perawatan**. Shizuku memerlukan server API 12+ dan grant normal. Root meminta `su` hanya melalui **Berikan izin root**, bukan saat membuka aplikasi/refresh. Untuk AxManager, ikuti [setup berikut](#akses-axmanager).
+3. Pilih **Pasang terjemahan**. Game dihentikan sebelum perubahan berkas. Pilihan akses disimpan; Root/AxManager memerlukan koneksi ulang lewat tombol izin setelah aplikasi/service dimulai ulang. Tidak ada fallback otomatis atau pergantian metode selama operasi.
+
+Jika kedua paket terpasang, pilih resource Global yang siap, lalu Galaxy Store, lalu paket terpasang pertama. Paket aktif dibekukan selama sesi.
+
+Upgrade versi sebelum Tauri memakai APK release dengan package/key yang sama; jangan uninstall atau hapus data. APK debug bukan jalur upgrade. Setelah upgrade, pilih metode akses dan **Perawatan → Migrasikan**. Migrasi offline mensyaratkan SHA-256/ukuran PAK cocok katalog rilis historis, signature tidak kosong, dan descriptor lama cocok persis dengan PAK/signature. Sumber lama dipertahankan sampai set baru terverifikasi; berkas ambigu/tidak dikenal memblokir mutasi. Setelah migrasi, pasang PAK stabil yang sesuai lini game/resource dan terapkan UID setelah status sehat.
+
+### Berkas dan batas keselamatan
+
+Rilis PAK diambil dari [stable latest WuwaID](https://github.com/TitoTFP/WuwaID/releases/latest), bukan rilis aplikasi. Metadata tag, aset, ukuran, dan hash tidak dibundel. Unduhan HTTPS dan cache pakai ulang diverifikasi dengan ukuran/SHA-256. Lini game/resource harus cocok; pemasangan memakai pasangan PAK/signature resmi pada resource materialized, prefer `Lang_en`.
+
+Layout Android di `Resources/<versi-resource>/`, berbeda dari `Patch/` launcher PC:
+
+- `wuwaid/WuwaID_99_P.pak` dan `wuwaid/WuwaID_99_P.sig` (signature resmi).
+- `wuwaid/.owner.json` untuk identitas/hash kepemilikan.
+- `Mount/wuwaid.txt`, dengan nama dasar tanpa ekstensi dan prioritas 99:
+
+```text
+wuwaid/WuwaID_99_P,99,<PAK_SHA1_UPPER>,<SIG_SHA1_UPPER>,,
+```
+
+Berkas resmi game tidak ditimpa. Mutasi dibatasi pada path WuwaID di versi resource numerik. Traversal, symlink, kepemilikan tidak dikenal, serta mount lain berprioritas 99 atau lebih tinggi ditolak; berkas asing tidak dihapus. Verifikasi dilakukan sebelum commit. Jurnal/backup mendukung rollback dan recovery tertunda tanpa jaringan; residu `.new`/`.bak` tanpa jurnal valid tidak dihapus otomatis.
+
+### UID kustom
+
+Teks maksimal **32 unit UTF-16**; spasi tepi dipangkas. Input kosong, karakter kontrol, dan pemisah baris ditolak. Ini mengganti teks tampilan, bukan UID akun. Pemasangan biasa menyalin PAK utuh; UID kustom mengubah salinan privat lalu mengemas ulang PAK. Reset mengembalikan PAK rilis asli dan format UID bawaan game. UID contoh di browser bukan data akun.
+
+### Pembaruan aplikasi
+
+Updater build Android release memeriksa stable terbaru saat startup dan melalui **Perawatan → Pembaruan aplikasi → Periksa pembaruan**. Unduh APK, tunggu verifikasi, lalu konfirmasikan dialog Android. Update tidak dipasang diam-diam, tidak menghapus data/PAK, tidak memerlukan Root/Shizuku, dan tidak berjalan bersama mutasi PAK. Batal/gagal bukan sukses. Browser, desktop, dan debug tidak menyediakan updater release.
+
+Sebelum membuka installer, periksa nama aset, ukuran/SHA-256, package `com.titotfp.wuwaid`, versi/tag, versionCode lebih tinggi, signer rilis, minSdk, dan ABI ARM64. Android memeriksa signature akhir. [Kontrak release dan upgrade](#release-dan-upgrade) memuat identitas, signing, dan checklist QA.
+
 ## Akses AxManager
 
 Pilih **AxManager** secara eksplisit di Perawatan. Persyaratan: Android API 26+, user utama (user 0), dan aplikasi **serta server** AxManager 2.0.1/versionCode 20100 atau lebih baru. Versi yang diverifikasi adalah 2.0.1.r442. Setelah update APK AxManager, mulai ulang servernya; server lama yang masih berjalan ditolak. Android API 24–25 tetap memakai Root/Shizuku; minimum SDK aplikasi tidak dinaikkan. Profil sekunder/work profile dan AxManager 1.x tidak didukung oleh backend ini.
@@ -227,7 +265,7 @@ CLI menghasilkan ikon bundle di `src-tauri/icons/` dan Android langsung di `src-
 
 `src-tauri/app-icon.json` memakai `app-icon-android-foreground.svg` untuk adaptive foreground: artwork 72×72 di tengah kanvas 108×108 (padding transparan 18 tiap sisi), sesuai viewport 72 dp. Ukuran awal 66×66 menyisakan bingkai putih; 72×72 memperbesar foto sekitar 9% sambil mempertahankan mask launcher. Jangan ganti dengan foreground penuh, regenerasi langsung dari PNG, atau mengandalkan `android_fg_scale` (CLI yang dipakai tidak mengecilkannya). Untuk xxxhdpi, batas artwork `(72,72)–(360,360)` pada kanvas 432×432.
 
-Periksa APK final—alpha/padding, label aplikasi/activity, dan resource ikon—bukan hanya RGB/sumber PNG. Preview mask lokal bukan screenshot perangkat. Uji update tanpa clear data; launcher dan info aplikasi harus menampilkan nama/ikon baru. Kandidat branding terbaru dan checksum dicatat di README.
+Periksa APK final—alpha/padding, label aplikasi/activity, dan resource ikon—bukan hanya RGB/sumber PNG. Preview mask lokal bukan screenshot perangkat. Uji update tanpa clear data; launcher dan info aplikasi harus menampilkan nama/ikon baru.
 
 ## Release dan upgrade
 
@@ -252,7 +290,7 @@ npm run tauri android build -- --apk --target aarch64
 
 Task `verifyUpgradeSigning` memeriksa sertifikat alias dan versionCode sebelum build. Secret tidak lengkap atau sertifikat berbeda menggagalkan build; tidak ada fallback debug atau pembuatan key baru. Sertifikat publik dalam APK tidak dapat menggantikan private key.
 
-Workflow release dipicu manual pada tag yang sudah ada. Workflow memeriksa package/version/certificate APK final dan alignment 16 KiB, lalu mengunggah kandidat signed beserta checksum sebagai artifact QA selama 14 hari. `upgrade_qa_completed=false` (default) tidak memublikasikan GitHub Release; set `true` hanya setelah pengguna menguji source/tag yang sama. Keystore sementara dihapus meskipun job gagal. Checklist rinci historis ada di README WM-25.
+Workflow release dipicu manual pada tag yang sudah ada. Workflow memeriksa package/version/certificate APK final dan alignment 16 KiB, lalu mengunggah kandidat signed beserta checksum sebagai artifact QA selama 14 hari. `upgrade_qa_completed=false` (default) tidak memublikasikan GitHub Release; set `true` hanya setelah pengguna menguji source/tag yang sama. Keystore sementara dihapus meskipun job gagal. Ikuti [prosedur migrasi](#instalasi-dan-migrasi) dan [checklist QA updater](#qa-updater-wajib).
 
 Release yang disetujui memakai `prerelease: false`, termasuk tag `v0.x`, agar tersedia pada updater kanal stabil. Nama aset wajib `WuwaID-Mobile-v<versi>.apk`, tepat satu aset cocok, dan checksum harus tersedia melalui GitHub digest atau `SHA256sums.txt`; ini kontrak updater, jangan ubah tanpa migrasi updater.
 
@@ -350,3 +388,6 @@ UserService Shizuku harus memulai ulang implementasi setelah upgrade kode: `User
 - [Perintah Android Tauri CLI](https://v2.tauri.app/reference/cli/#android-build)
 - [Cargo: debug information dan runtime checks](https://doc.rust-lang.org/cargo/reference/profiles.html#debug)
 - [Gradle: incremental task](https://docs.gradle.org/current/userguide/custom_tasks.html#incremental_tasks)
+- Implementasi terdahulu: [Resource Mount](https://github.com/TitoTFP/WuwaIDLauncher/blob/676c4a9b3b3f14ccb570d90252dc8972dbac8d13/src-tauri/src/engine/installer.rs#L95-L111), [algoritme UID](https://github.com/TitoTFP/WuwaIDLauncher/blob/676c4a9b3b3f14ccb570d90252dc8972dbac8d13/src-tauri/src/engine/patch_asset.rs), [ikon](https://github.com/TitoTFP/WuwaIDLauncher/blob/676c4a9b3b3f14ccb570d90252dc8972dbac8d13/src-tauri/icons/icon.png), dan [kontrak berkas v0.3.4](https://github.com/TitoTFP/WuwaIDMobile/blob/v0.3.4/app/src/main/java/com/titotfp/wuwaid/GamePaths.kt).
+- Kontrak dependensi: [Shizuku UserService API](https://github.com/RikkaApps/Shizuku-API#userservice), [libsu 6.0.0](https://github.com/topjohnwu/libsu/tree/6.0.0), dan [reqwest connection pool](https://docs.rs/reqwest/0.12.28/reqwest/blocking/struct.Client.html).
+- Rilis PAK historis: [daftar rilis](https://github.com/TitoTFP/WuwaID/releases) dan [v3.7.1-id.1](https://github.com/TitoTFP/WuwaID/releases/tag/v3.7.1-id.1).
