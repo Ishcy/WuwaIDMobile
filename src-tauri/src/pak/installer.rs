@@ -139,7 +139,7 @@ pub fn inspect(storage: &dyn Storage, layout: &ResourceLayout) -> PakResult<Inst
         .chain(&current_lifecycle)
         .any(|path| existing.contains(path.as_str()));
     let mut legacy_pending = false;
-    for ((_, version), paths) in versions.iter().zip(legacy_paths.chunks_exact(3)) {
+    for ((_, version), paths) in versions.iter().zip(legacy_paths.as_chunks::<3>().0) {
         if paths.iter().any(|path| existing.contains(path.as_str())) {
             legacy_pending = true;
             installed = true;
