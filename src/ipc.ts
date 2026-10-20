@@ -101,7 +101,7 @@ export const api = {
     if (!native) return Promise.resolve({
       supported: false, currentVersion: null, currentVersionCode: null,
       availableVersion: null, size: 0, ready: false, checked: false,
-      message: "Updater APK hanya tersedia pada aplikasi Android release; browser tidak melakukan update aplikasi.",
+      message: "Tersedia di aplikasi Android versi rilis.",
     });
     const progress = new Channel<Progress>();
     progress.onmessage = (value) => onProgress?.(value);

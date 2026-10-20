@@ -144,16 +144,16 @@ export function readiness(d: Dashboard): {
   if (!d.platformSupported)
     return {
       ready: false,
-      label: "Memerlukan Android",
+      label: "Perlu Android",
       detail:
         d.blocker ??
-        "Pemasangan memerlukan Android dengan Shizuku, Root, atau AxManager.",
+        "Gunakan Android dengan Shizuku, Root, atau AxManager.",
     };
   if (!d.game.installed)
     return {
       ready: false,
       label: "Game belum ditemukan",
-      detail: "Pasang Wuthering Waves Global atau Galaxy Store, lalu periksa ulang.",
+      detail: "Pasang versi Global atau Galaxy Store, lalu periksa ulang.",
     };
   if (d.access.method === "axmanager" && (!d.axmanager.installed || !d.axmanager.supported || !d.axmanager.running))
     return {
@@ -161,14 +161,14 @@ export function readiness(d: Dashboard): {
       label: !d.axmanager.installed ? "AxManager belum terpasang"
         : !d.axmanager.supported ? "AxManager belum didukung" : "AxManager belum aktif",
       detail: !d.axmanager.supported && d.axmanager.installed
-        ? "Memerlukan Android 8+, user utama, dan AxManager 2.0.1+. Pilih metode lain di Perawatan."
-        : "Pasang atau aktifkan server AxManager, lalu periksa ulang. Layanan Shizuku tidak diperlukan.",
+        ? "Perlu Android 8+, user utama, dan AxManager 2.0.1+. Pilih akses lain di Perawatan."
+        : "Pasang AxManager dan aktifkan server, lalu periksa ulang.",
     };
   if (d.access.method === "root" && !d.access.granted)
     return {
       ready: false,
       label: "Izin root diperlukan",
-      detail: "Berikan izin root melalui pengelola root, atau pilih Shizuku di Perawatan.",
+      detail: "Izinkan akses root, atau pilih Shizuku di Perawatan.",
     };
   if (d.access.method === "shizuku" && !d.shizuku.running)
     return {
@@ -181,14 +181,14 @@ export function readiness(d: Dashboard): {
     return {
       ready: false,
       label: "Izin diperlukan",
-      detail: d.access.method === "axmanager" ? "Hubungkan storage melalui tombol Berikan izin AxManager."
-        : "Berikan izin Shizuku.",
+      detail: d.access.method === "axmanager" ? "Hubungkan AxManager untuk melanjutkan."
+        : "Izinkan Shizuku untuk melanjutkan.",
     };
   if (d.resource.ready && (d.patch.legacyPending || d.patch.recoveryPending))
     return {
       ready: false,
       label: d.patch.recoveryPending ? "Perlu pemulihan" : "Pemasangan versi lama",
-      detail: d.patch.message ?? "Jalankan migrasi atau pemulihan di Perawatan. Tidak perlu mengunduh rilis untuk tindakan ini.",
+      detail: d.patch.message ?? "Buka Perawatan untuk migrasi atau pemulihan tanpa unduhan.",
     };
   if (
     d.mode === "native" &&
@@ -223,7 +223,7 @@ export function readiness(d: Dashboard): {
       ready: false,
       label: "Pemasangan diblokir",
       detail:
-        d.blocker ?? "Metode akses terpilih tidak dapat menulis direktori resource game.",
+        d.blocker ?? "Akses terpilih tidak dapat menulis folder resource game.",
     };
   if (d.patch.recoveryPending || (d.patch.installed && !d.patch.healthy))
     return {

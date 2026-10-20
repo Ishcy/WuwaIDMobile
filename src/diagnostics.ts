@@ -100,7 +100,7 @@ export async function exportInBrowser(action: "save" | "share", report: Diagnost
   }
   const file = new File([blob], report.filename, { type: "application/json" });
   if (!navigator.canShare?.({ files: [file] }) || !navigator.share)
-    return { status: "failed", message: "Browser ini tidak mendukung berbagi berkas. Gunakan Simpan atau aplikasi Android." };
+    return { status: "failed", message: "Browser ini tidak mendukung berbagi file. Pilih Simpan." };
   try {
     await navigator.share({ files: [file], title: "Diagnostik WuwaID Mobile" });
     return { status: "share_opened" };
@@ -115,8 +115,8 @@ export function diagnosticExportMessage(result: DiagnosticExportResult): string 
   switch (result.status) {
     case "saved": return "Diagnostik disimpan.";
     case "cancelled": return "Ekspor diagnostik dibatalkan.";
-    case "share_opened": return "Dialog berbagi dibuka; pengiriman ditentukan aplikasi penerima.";
-    case "download_started": return "Unduhan diagnostik dimulai; periksa hasilnya di unduhan browser.";
+    case "share_opened": return "Menu berbagi dibuka.";
+    case "download_started": return "Unduhan diagnostik dimulai.";
     case "failed": return result.message ?? "Ekspor diagnostik gagal.";
   }
 }

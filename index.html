@@ -7,7 +7,7 @@
       name="description"
       content="Terjemahan Bahasa Indonesia untuk Wuthering Waves."
     />
-    <meta name="theme-color" content="#f5f3ef" />
+    <meta name="theme-color" content="#f6f7fa" />
     <script>
       // Resolve before CSS paints; storage may be unavailable in a WebView.
       (() => {
@@ -22,7 +22,7 @@
         document.documentElement.dataset.theme = theme;
         document.documentElement.dataset.themePreference = preference;
         document.querySelector('meta[name="theme-color"]').content =
-          theme === "dark" ? "#15151b" : "#f5f3ef";
+          theme === "dark" ? "#14141b" : "#f6f7fa";
       })();
     </script>
     <link rel="stylesheet" href="/src/styles.css" />
@@ -34,10 +34,10 @@
     <a class="skip-link" href="#main-content">Langsung ke konten</a>
     <div id="app"></div>
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <dialog id="confirm-dialog" aria-labelledby="dialog-title">
-      <div class="dialog-icon">!</div>
+    <dialog id="confirm-dialog" aria-labelledby="dialog-title" aria-describedby="dialog-description">
+      <div class="dialog-icon" aria-hidden="true">!</div>
       <h2 id="dialog-title">Hapus terjemahan?</h2>
-      <p>Hapus terjemahan simulasi dan reset tampilan UID? File game tidak diubah.</p>
+      <p id="dialog-description">Terjemahan simulasi dihapus dan UID direset. File game tidak diubah.</p>
       <div class="actions">
         <button class="btn btn-secondary" id="cancel-uninstall">Batal</button>
         <button class="btn btn-danger" id="confirm-uninstall">

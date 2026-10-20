@@ -29,7 +29,7 @@ async function run(action: "check" | "download" | "install") {
   if (pending) return;
   pending = action;
   failure = "";
-  progress = action === "check" ? null : { percent: 0, label: "Menyiapkan pembaruan aplikasi…" };
+  progress = action === "check" ? null : { percent: 0, label: "Menyiapkan pembaruan…" };
   changed();
   try {
     status = await api.appUpdate(action, showProgress);
@@ -39,7 +39,7 @@ async function run(action: "check" | "download" | "install") {
       try {
         status = await api.appUpdate("status");
       } catch (refreshError) {
-        failure += ` Status updater belum dapat dibaca ulang: ${String(refreshError)}`;
+        failure += ` Gagal memuat ulang status: ${String(refreshError)}`;
       }
     }
   } finally {
@@ -78,17 +78,21 @@ export function renderAppUpdate(gameBusy: boolean, details: boolean): string {
   const version = status?.availableVersion;
   const supported = status?.supported !== false;
   const size = status?.size ? `${(status.size / (1024 * 1024)).toFixed(1)} MiB` : "";
+  const message = pending === "check" ? "Memeriksa pembaruan…"
+    : status?.message || (version ? "" : status?.checked ? "Aplikasi sudah terbaru." : "Belum diperiksa.");
   return `<section class="card app-update-card" aria-labelledby="app-update-title">
-    <div class="card-header"><h2 id="app-update-title">Pembaruan aplikasi</h2>${icon("download")}</div>
-    <div role="status" aria-live="polite">
-      ${status?.currentVersion ? `<p class="muted">Terpasang: ${esc(status.currentVersion)}${status.currentVersionCode !== null ? ` · kode ${status.currentVersionCode}` : ""}</p>` : ""}
-      ${version ? `<p><strong>Versi ${esc(version)} tersedia${size ? ` · ${size}` : ""}.</strong></p>` : ""}
-      <p class="muted">${esc(pending === "check" ? "Memeriksa versi aplikasi di GitHub…" : status?.message ?? "Belum memeriksa pembaruan aplikasi.")}</p>
+    <div class="app-update-copy">
+      <h2 id="app-update-title">Pembaruan aplikasi</h2>
+      <div role="status" aria-live="polite">
+        ${status?.currentVersion ? `<p class="muted">Terpasang ${esc(status.currentVersion)}${status.currentVersionCode !== null ? ` · kode ${status.currentVersionCode}` : ""}</p>` : ""}
+        ${version ? `<p><strong>${esc(version)} tersedia${size ? ` · ${size}` : ""}</strong></p>` : ""}
+        ${message ? `<p class="muted">${esc(message)}</p>` : ""}
+      </div>
+      ${failure ? `<p class="app-update-error" role="alert">${esc(failure)}</p>` : ""}
     </div>
-    ${failure ? `<p class="app-update-error" role="alert">${esc(failure)}</p>` : ""}
     <div class="actions">
-      <button class="btn btn-secondary" data-action="app-update-check" ${disabled} ${supported ? "" : "disabled"}>${icon("refresh")} Periksa pembaruan</button>
-      ${supported && version ? `<button class="btn btn-primary" data-action="${status?.ready ? "app-update-install" : "app-update-download"}" ${disabled}>${icon(status?.ready ? "external" : "download")} ${status?.ready ? "Pasang update" : "Unduh APK"}</button>` : ""}
+      <button class="btn btn-secondary" data-action="app-update-check" ${disabled} ${supported ? "" : "disabled"}>${icon("refresh")} Periksa</button>
+      ${supported && version ? `<button class="btn btn-primary" data-action="${status?.ready ? "app-update-install" : "app-update-download"}" ${disabled}>${icon(status?.ready ? "external" : "download")} ${status?.ready ? "Pasang pembaruan" : "Unduh APK"}</button>` : ""}
     </div>
     ${progress ? `<div class="progress-card" id="app-update-progress" role="status" aria-live="polite"><div><strong>${esc(progress.label)}</strong><span>${progress.percent}%</span></div><div class="progress-track" role="progressbar" aria-label="Progres pembaruan aplikasi" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress.percent}"><span class="progress-fill" style="transform: scaleX(${progress.percent / 100})"></span></div></div>` : ""}
   </section>`;

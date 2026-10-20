@@ -50,7 +50,7 @@ function applyTheme() {
   document.documentElement.dataset.theme = theme;
   document.documentElement.dataset.themePreference = themePreference;
   document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')!.content =
-    theme === "dark" ? "#15151b" : "#f5f3ef";
+    theme === "dark" ? "#14141b" : "#f6f7fa";
   app.querySelectorAll<HTMLButtonElement>("[data-theme-choice]").forEach((button) => {
     button.setAttribute("aria-pressed", String(button.dataset.themeChoice === themePreference));
   });
@@ -85,15 +85,15 @@ function renderHome() {
   else if (!d.game.installed)
     primary = { action: "setup-game", label: "Pasang game" };
   else if (d.access.method === "root" && !d.access.granted)
-    primary = { action: "request_root", label: "Berikan izin root" };
+    primary = { action: "request_root", label: "Izinkan root" };
   else if (d.access.method === "shizuku" && !d.shizuku.running)
     primary = { action: "setup-shizuku", label: "Buka Shizuku" };
   else if (d.access.method === "axmanager" && (!d.axmanager.installed || !d.axmanager.supported || !d.axmanager.running))
     primary = { action: "setup-axmanager", label: "Buka AxManager" };
   else if (d.access.method === "axmanager" && !d.access.granted)
-    primary = { action: "request_axmanager", label: "Berikan izin AxManager" };
+    primary = { action: "request_axmanager", label: "Hubungkan AxManager" };
   else if (!d.access.granted)
-    primary = { action: "request_permission", label: "Berikan izin Shizuku" };
+    primary = { action: "request_permission", label: "Izinkan Shizuku" };
   else if (d.patch.legacyPending || d.patch.recoveryPending)
     primary = { action: "tools", label: "Buka Perawatan" };
   else if (d.mode === "native" && !d.release)
@@ -111,14 +111,14 @@ function renderHome() {
     d.mode === "native" &&
     d.release?.tag !== d.patch.version
   )
-    primary = { action: "install", label: "Pasang rilis terbaru" };
+    primary = { action: "install", label: "Perbarui terjemahan" };
   else if (d.patch.installed)
     primary = { action: "launch_game", label: "Buka game" };
   const deviceRows = [
     {
       name: "Wuthering Waves",
       value: !d.platformSupported
-        ? "Hanya tersedia di Android"
+        ? "Perlu Android"
         : d.game.installed
           ? `${d.game.packageName.endsWith(".samsung") ? "Galaxy Store" : "Global"} · ${d.game.version}`
           : "Belum terpasang",
@@ -128,24 +128,24 @@ function renderHome() {
     {
       name: ACCESS_LABELS[d.access.method],
       value: !d.platformSupported
-        ? "Memerlukan Android"
+        ? "Perlu Android"
         : d.access.granted
-          ? "Aktif · diizinkan"
+          ? "Terhubung"
           : d.access.method === "root"
-            ? "Menunggu izin root"
+            ? "Perlu izin"
             : d.access.method === "axmanager"
-              ? (!d.axmanager.installed ? "Belum terpasang" : !d.axmanager.supported ? "Versi/perangkat belum didukung"
-                : d.axmanager.running ? "Menunggu izin/koneksi" : "Server belum aktif")
-              : d.shizuku.running ? "Menunggu izin" : "Belum aktif",
+              ? (!d.axmanager.installed ? "Belum terpasang" : !d.axmanager.supported ? "Belum didukung"
+                : d.axmanager.running ? "Perlu koneksi" : "Server belum aktif")
+              : d.shizuku.running ? "Perlu izin" : "Belum aktif",
       ok: d.access.granted,
       icon: "shield",
     },
     {
-      name: "Resource game",
+      name: "Resource",
       value: !d.platformSupported
-        ? "Perlu akses Android"
+        ? "Perlu Android"
         : d.resource.ready
-          ? `Lengkap · ${d.resource.version}`
+          ? d.resource.version
           : "Unduhan belum selesai",
       ok: d.resource.ready && compatibleGameVersion(d, d.resource.version),
       icon: "folder",
@@ -159,20 +159,23 @@ function renderHome() {
       : d.release
         ? `${d.release.gameVersion.split(".").slice(0, 2).join(".")}.*`
         : "—";
-  return `<section class="page-heading home-heading">
-      <div><h1>Bahasa Indonesia</h1><p>Terjemahan Wuthering Waves</p></div>
-      <button class="btn btn-primary" data-action="${primary.action}" ${disabled}>${icon(d.patch.installed ? "external" : "download")} ${primary.label}</button>
+  const primaryIcon = primary.action === "launch_game" ? "external"
+    : primary.action === "tools" ? "tools"
+      : primary.action === "refresh" ? "refresh"
+        : primary.action === "install" ? "download" : "arrow";
+  return `<section class="page-heading">
+      <h1>Bahasa Indonesia</h1><p>Wuthering Waves</p>
     </section>
     <div class="home-grid">
       <section class="card translation-card" aria-labelledby="translation-title">
-        <div class="card-header"><h2 id="translation-title">Paket</h2>${icon("download")}</div>
-        <div class="package-state"><span class="status-dot ${ready.ready ? "good" : "warning"}"></span><div><strong>${esc(ready.label)}</strong>${!ready.ready ? `<p>${esc(ready.detail)}</p>` : ""}</div></div>
-        <div class="package-facts"><div><span>Terbaru</span><strong>${esc(contentVersion)}</strong></div><div><span>Versi game</span><strong>${esc(gameLine)}</strong></div>${d.patch.installed ? `<div><span>Terpasang</span><strong>${esc(d.patch.version)}</strong></div>` : ""}</div>
-        ${d.patch.installed && ready.ready ? `<button class="text-button" data-action="install" ${disabled}>Pasang ulang ${icon("refresh")}</button>` : ""}
+        <div class="card-header"><h2 id="translation-title">Terjemahan</h2><span class="status-badge ${ready.ready ? "good" : "warning"}">${icon(ready.ready ? "check" : "info")}${esc(ready.ready && d.patch.installed ? "Terpasang" : ready.label)}</span></div>
+        ${!ready.ready ? `<p class="package-detail">${esc(ready.detail)}</p>` : ""}
+        <dl class="package-facts"><div><dt>Terbaru</dt><dd>${esc(contentVersion)}</dd></div><div><dt>Untuk game</dt><dd>${esc(gameLine)}</dd></div>${d.patch.installed ? `<div><dt>Terpasang</dt><dd>${esc(d.patch.version)}</dd></div>` : ""}</dl>
+        <div class="package-actions"><button class="btn btn-primary" data-action="${primary.action}" ${disabled}>${icon(primaryIcon)} ${primary.label}</button>${d.patch.installed && ready.ready ? `<button class="text-button" data-action="install" ${disabled}>${icon("refresh")} Pasang ulang</button>` : ""}</div>
       </section>
       <section class="card device-card" aria-labelledby="device-title">
-        <div class="card-header"><h2 id="device-title">Perangkat</h2><button class="icon-btn" data-action="refresh" aria-label="Periksa perangkat" ${state.busy || appUpdateBusy() ? "disabled" : ""}>${icon("refresh")}</button></div>
-        <div class="device-list">${deviceRows.map((row) => `<div class="device-row"><span class="device-icon">${icon(row.icon)}</span><div><strong>${row.name}</strong><p>${esc(row.value)}</p></div><span class="device-check ${row.ok ? "" : "pending"}" aria-label="${row.ok ? "Siap" : "Perlu perhatian"}">${row.ok ? icon("check") : icon("info")}</span></div>`).join("")}</div>
+        <div class="card-header"><h2 id="device-title">Perangkat</h2><button class="icon-btn" data-action="refresh" aria-label="Periksa perangkat" title="Periksa perangkat" ${state.busy || appUpdateBusy() ? "disabled" : ""}>${icon("refresh")}</button></div>
+        <div class="device-list">${deviceRows.map((row) => `<div class="device-row"><span class="device-icon">${icon(row.icon)}</span><div><strong>${row.name}</strong><p>${esc(row.value)}</p></div><span class="device-check ${row.ok ? "" : "pending"}" aria-label="${row.ok ? "Siap" : "Perlu perhatian"}">${icon(row.ok ? "check" : "info")}</span></div>`).join("")}</div>
       </section>
     </div>`;
 }
@@ -185,7 +188,7 @@ function render() {
     : null;
   if (!app.querySelector(".app-header")) {
     app.innerHTML = `<header class="app-header"><div class="header-inner"><a class="brand" href="#home" aria-label="WuwaIDMobile Beranda"><span class="brand-symbol">${logo}</span><span>wuwa<span class="brand-id">id</span></span></a><nav class="desktop-nav" aria-label="Navigasi utama">${navigation.map((item) => `<button class="nav-item ${section === item.id ? "active" : ""}" data-section="${item.id}" ${section === item.id ? 'aria-current="page"' : ""}>${item.label}</button>`).join("")}</nav>${renderThemeControl()}</div></header>
-    <div class="workspace">${state.dashboard.mode === "mock" ? `<p class="mode-notice">${icon("info")} Simulasi · file game tidak diubah.</p>` : ""}
+    <div class="workspace">${state.dashboard.mode === "mock" ? `<p class="mode-notice">${icon("info")} Simulasi · file game tidak diubah</p>` : ""}
     <main id="main-content" tabindex="-1"></main><footer class="footer">Tidak berafiliasi dengan Kuro Games.</footer></div>
     <nav class="mobile-nav" aria-label="Navigasi seluler">${navigation.map((item) => `<button data-section="${item.id}" class="${section === item.id ? "active" : ""}" ${section === item.id ? 'aria-current="page"' : ""}>${icon(item.id)}<span>${item.label}</span></button>`).join("")}</nav>`;
   }
@@ -200,8 +203,8 @@ function render() {
   content.innerHTML = `
     ${error ? `<div class="error-banner" role="alert">${icon("info")}<span>${esc(error)}</span><button class="icon-btn" data-action="dismiss-error" aria-label="Tutup pesan">${icon("close")}</button></div>` : ""}
     ${state.busy ? `<div class="progress-card" role="status" aria-live="polite"><div><strong>${esc(state.progress?.label ?? "Menyiapkan…")}</strong><span>${state.progress?.percent ?? 0}%</span></div><div class="progress-track" role="progressbar" aria-label="Progres pemasangan" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${state.progress?.percent ?? 0}"><span class="progress-fill" style="transform: scaleX(${(state.progress?.percent ?? 0) / 100})"></span></div></div>` : ""}
-    ${renderAppUpdate(state.busy, section === "tools")}
-    ${section === "home" ? renderHome() : section === "customize" ? renderCustomize(panelState) : renderTools(panelState)}`;
+    ${section === "home" ? renderHome() : section === "customize" ? renderCustomize(panelState) : renderTools(panelState)}
+    ${renderAppUpdate(state.busy, section === "tools")}`;
   if (renderedSection !== section) {
     content.getAnimations().forEach((animation) => animation.cancel());
     if (!reducedMotion.matches)
@@ -213,8 +216,8 @@ function render() {
   }
   dialog.querySelector("p")!.textContent =
     state.dashboard.mode === "mock"
-      ? "Hapus terjemahan simulasi dan reset tampilan UID? File game tidak diubah."
-      : "Hapus paket dan mount WuwaIDMobile? File game asli tetap utuh.";
+      ? "Terjemahan simulasi dihapus dan UID direset. File game tidak diubah."
+      : "Paket dan mount WuwaIDMobile dihapus. File game asli tetap utuh.";
   if (focusAction)
     Array.from(app.querySelectorAll<HTMLElement>("[data-action]"))
       .find((el) => el.dataset.action === focusAction)
@@ -243,7 +246,7 @@ async function execute(work: () => Promise<void>) {
       try {
         state.dashboard = await api.load();
       } catch (refreshError) {
-        error += ` Status perangkat belum dapat dibaca ulang: ${String(refreshError)}`;
+        error += ` Gagal memuat ulang status: ${String(refreshError)}`;
       }
     }
   } finally {
@@ -271,17 +274,17 @@ async function operate(operation: Operation, uidText?: string) {
       uninstall: state.dashboard.mode === "mock"
         ? "Terjemahan dihapus. Tampilan UID direset."
         : "Terjemahan dihapus.",
-      apply_uid: "Tampilan UID diterapkan.",
-      restore_uid: "Tampilan UID direset.",
+      apply_uid: "UID kustom diterapkan.",
+      restore_uid: "UID bawaan dipulihkan.",
       launch_game: state.dashboard.mode === "mock"
         ? "Simulasi buka game selesai."
         : "Game dibuka.",
       request_permission: "Izin Shizuku diberikan.",
       request_root: "Akses root aktif.",
-      use_root: "Metode Root dipilih. Berikan izin root untuk mengakses game.",
-      use_shizuku: "Metode Shizuku dipilih.",
-      request_axmanager: "Storage AxManager terhubung.",
-      use_axmanager: "Metode AxManager dipilih. Hubungkan storage melalui tombol izin.",
+      use_root: "Root dipilih. Izinkan akses untuk melanjutkan.",
+      use_shizuku: "Shizuku dipilih.",
+      request_axmanager: "AxManager terhubung.",
+      use_axmanager: "AxManager dipilih. Hubungkan akses untuk melanjutkan.",
     };
     notify(messages[operation]);
   });
@@ -294,7 +297,7 @@ app.addEventListener("click", async (event) => {
     try {
       localStorage.setItem("wuwaidmobile.theme", themePreference);
     } catch {
-      notify("Tema berlaku untuk sesi ini; preferensi tidak dapat disimpan.");
+      notify("Tema hanya berlaku untuk sesi ini; gagal menyimpan preferensi.");
     }
     applyTheme();
     return;
