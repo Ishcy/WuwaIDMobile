@@ -15,7 +15,7 @@
 </div>
 
 > [!NOTE]
-> README ini membahas rebuild Tauri yang belum dirilis publik. APK yang saat ini tersedia di **Releases** masih berasal dari versi aplikasi sebelumnya.
+> Dokumentasi ini untuk **1.0.0**. Lihat versi dan APK yang sudah dipublikasikan di **Releases**.
 
 ## Satu aplikasi, untuk perjalananmu
 

@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing release tag, for example v0.4.0
+        description: Existing stable release tag, for example v1.0.0
         required: true
         type: string
       upgrade_qa_completed:
@@ -12,9 +12,14 @@ on:
         required: true
         default: false
         type: boolean
+      candidate_artifact_id:
+        description: Immutable signed artifact ID that passed manual QA; required for publication
+        required: false
+        type: string
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   release:
@@ -22,8 +27,47 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag }}
+          ref: refs/tags/${{ inputs.tag }}
+      - name: Verify release source and candidate provenance
+        id: release-source
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          PROMOTE_RELEASE: ${{ inputs.upgrade_qa_completed }}
+          CANDIDATE_ARTIFACT_ID: ${{ inputs.candidate_artifact_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, re, subprocess
+          tag = os.environ['RELEASE_TAG']
+          config = json.loads(pathlib.Path('src-tauri/tauri.conf.json').read_text())
+          if not re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+', tag) or tag != 'v' + config['version']:
+              raise SystemExit('Tag does not match configured application version')
+          source = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          if os.environ['GITHUB_REF'] != 'refs/tags/' + tag or os.environ['GITHUB_SHA'] != source:
+              raise SystemExit('Dispatch this workflow on the requested release tag, not main')
+          if os.environ['PROMOTE_RELEASE'] == 'true':
+              artifact_id = os.environ['CANDIDATE_ARTIFACT_ID']
+              if not re.fullmatch(r'[1-9][0-9]*', artifact_id):
+                  raise SystemExit('Publication requires the immutable artifact ID that passed manual QA')
+              repo = os.environ['GITHUB_REPOSITORY']
+              def api(path):
+                  return json.loads(subprocess.check_output(['gh', 'api', f'repos/{repo}/{path}'], text=True))
+              artifact = api(f'actions/artifacts/{artifact_id}')
+              if artifact['expired'] or artifact['name'] != 'wuwaidmobile-signed-' + tag:
+                  raise SystemExit('Artifact is expired or is not the signed candidate for this tag')
+              run = api(f"actions/runs/{artifact['workflow_run']['id']}")
+              workflow = api('actions/workflows/release.yml')
+              if (run['workflow_id'] != workflow['id'] or run['event'] != 'workflow_dispatch'
+                  or run['status'] != 'completed' or run['conclusion'] != 'success'
+                  or run['head_repository']['full_name'] != repo
+                  or run['head_sha'] != source or artifact['workflow_run']['head_sha'] != source):
+                  raise SystemExit('Candidate must come from a successful release workflow on this exact commit')
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+                  output.write(f"candidate_run_id={run['id']}\n")
+              print(f'Approved candidate artifact {artifact_id} from run {run["id"]} at {source}')
+          PY
       - uses: actions/setup-node@v4
+        if: ${{ !inputs.upgrade_qa_completed }}
         with:
           node-version: 24
           cache: npm
@@ -35,12 +79,19 @@ jobs:
         with:
           packages: platform-tools
       - uses: dtolnay/rust-toolchain@stable
+        if: ${{ !inputs.upgrade_qa_completed }}
         with:
           targets: aarch64-linux-android
       - uses: Swatinem/rust-cache@v2
+        if: ${{ !inputs.upgrade_qa_completed }}
       - name: Install Android build tools
+        if: ${{ !inputs.upgrade_qa_completed }}
         run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.3.13750724'
+      - name: Install Android verification tools
+        if: inputs.upgrade_qa_completed
+        run: sdkmanager 'build-tools;36.0.0'
       - name: Decode original release keystore
+        if: ${{ !inputs.upgrade_qa_completed }}
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
@@ -48,7 +99,9 @@ jobs:
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/wuwaid-mobile.jks"
           chmod 600 "$RUNNER_TEMP/wuwaid-mobile.jks"
       - run: npm ci
+        if: ${{ !inputs.upgrade_qa_completed }}
       - name: Build signed ARM64 release APK
+        if: ${{ !inputs.upgrade_qa_completed }}
         env:
           ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/wuwaid-mobile.jks
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -58,29 +111,53 @@ jobs:
           export NDK_HOME="$ANDROID_HOME/ndk/27.3.13750724"
           npm run tauri android build -- --apk --target aarch64
       - name: Set up Java for Robolectric API 36
+        if: ${{ !inputs.upgrade_qa_completed }}
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
       - name: Run updater behavior tests
+        if: ${{ !inputs.upgrade_qa_completed }}
         run: |
           export NDK_HOME="$ANDROID_HOME/ndk/27.3.13750724"
           npm test
           ./src-tauri/gen/android/gradlew -p src-tauri/gen/android :app:testUniversalDebugUnitTest --no-configuration-cache --console=plain
+      - name: Download the immutable candidate approved by QA
+        if: inputs.upgrade_qa_completed
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ inputs.candidate_artifact_id }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.release-source.outputs.candidate_run_id }}
+          merge-multiple: true
+          path: .
       - name: Verify upgrade identity and prepare artifacts
         env:
           RELEASE_TAG: ${{ inputs.tag }}
+          PROMOTE_RELEASE: ${{ inputs.upgrade_qa_completed }}
         run: |
           python3 - <<'PY'
-          import json, os, pathlib, re, shutil, subprocess
+          import hashlib, json, os, pathlib, re, shutil, subprocess
           tag = os.environ['RELEASE_TAG']
           config = json.loads(pathlib.Path('src-tauri/tauri.conf.json').read_text())
           if tag != 'v' + config['version']:
               raise SystemExit('Tag does not match configured application version')
-          apks = list(pathlib.Path('src-tauri/gen/android/app/build/outputs/apk').glob('**/release/*.apk'))
-          if len(apks) != 1:
-              raise SystemExit('Expected exactly one ARM64 release APK')
-          apk = apks[0]
+          promote = os.environ['PROMOTE_RELEASE'] == 'true'
+          release_apk = pathlib.Path('WuwaID-Mobile-' + tag + '.apk')
+          if promote:
+              apk = release_apk
+          else:
+              apks = list(pathlib.Path('src-tauri/gen/android/app/build/outputs/apk').glob('**/release/*.apk'))
+              if len(apks) != 1:
+                  raise SystemExit('Expected exactly one ARM64 release APK')
+              apk = apks[0]
+          with apk.open('rb') as source:
+              digest = hashlib.file_digest(source, 'sha256').hexdigest()
+          checksum = digest + '  ' + release_apk.name + '\n'
+          sums = pathlib.Path('SHA256sums.txt')
+          if promote and sums.read_text() != checksum:
+              raise SystemExit('Candidate APK does not match its original QA checksum')
           tools = pathlib.Path(os.environ['ANDROID_HOME']) / 'build-tools/36.0.0'
           badging = subprocess.check_output([str(tools/'aapt2'), 'dump', 'badging', str(apk)], text=True)
           identity = re.search(r"package: name='([^']+)' versionCode='([^']+)' versionName='([^']+)'", badging)
@@ -91,10 +168,13 @@ jobs:
           if fingerprints != ['2cb1b4fed5446cf52018b5d56d58c379d7328022c1ba17278c19c0002e484df9']:
               raise SystemExit('Release APK is not signed by the original published certificate')
           subprocess.run([str(tools/'zipalign'), '-c', '-P', '16', '4', str(apk)], check=True)
-          shutil.copyfile(apk, 'WuwaID-Mobile-' + tag + '.apk')
+          if not promote:
+              shutil.copyfile(apk, release_apk)
+              sums.write_text(checksum)
           PY
-          sha256sum "WuwaID-Mobile-${RELEASE_TAG}.apk" > SHA256sums.txt
       - name: Upload signed candidate for manual QA
+        if: ${{ !inputs.upgrade_qa_completed }}
+        id: signed-candidate
         uses: actions/upload-artifact@v4
         with:
           name: wuwaidmobile-signed-${{ inputs.tag }}
@@ -103,6 +183,14 @@ jobs:
             SHA256sums.txt
           if-no-files-found: error
           retention-days: 14
+      - name: Record immutable candidate for QA
+        if: ${{ !inputs.upgrade_qa_completed }}
+        env:
+          ARTIFACT_ID: ${{ steps.signed-candidate.outputs.artifact-id }}
+          ARTIFACT_URL: ${{ steps.signed-candidate.outputs.artifact-url }}
+        run: |
+          printf 'Signed QA artifact: [%s](%s)\n\n' "$ARTIFACT_ID" "$ARTIFACT_URL" >> "$GITHUB_STEP_SUMMARY"
+          cat SHA256sums.txt >> "$GITHUB_STEP_SUMMARY"
       - name: Publish approved release
         if: inputs.upgrade_qa_completed
         uses: softprops/action-gh-release@v2

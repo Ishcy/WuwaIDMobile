@@ -62,7 +62,7 @@ npm run tauri android build -- --debug --apk --target aarch64
 
 Jangan berbagi `CARGO_TARGET_DIR` antarworktree: Tauri/Wry menghasilkan kode Kotlin pada path proyek. Cache worktree lain dapat melewati generasi dan menyebabkan `TauriActivity` tidak ditemukan pada checkout baru. Gunakan target default `src-tauri/target` atau override milik worktree tersebut; bukan `android init` ulang.
 
-Output berada di `src-tauri/gen/android/app/build/outputs/apk/`. CI membangun ARM64 dengan perintah sama dan menyimpan artifact 14 hari. APK debug memakai package `com.titotfp.wuwaid.debug`, versi `0.4.0-debug`; bisa berdampingan dengan release, tetapi bukan upgrade release. Jangan distribusikan signing debug atau jalankan dua installer bersamaan pada resource game yang sama.
+Output berada di `src-tauri/gen/android/app/build/outputs/apk/`. CI membangun ARM64 dengan perintah sama dan menyimpan artifact 14 hari. APK debug memakai package `com.titotfp.wuwaid.debug`, versi `1.0.0-debug`; bisa berdampingan dengan release, tetapi bukan upgrade release. Jangan distribusikan signing debug atau jalankan dua installer bersamaan pada resource game yang sama.
 
 ### Profile debug
 
@@ -73,7 +73,7 @@ Output berada di `src-tauri/gen/android/app/build/outputs/apk/`. CI membangun AR
 ### Instalasi dan migrasi
 
 1. Pasang Global (`com.kurogame.wutheringwaves.global`) atau Galaxy Store (`com.kurogame.wutheringwaves.samsung`); selesaikan resource game dan paket bahasa Inggris.
-2. Pilih metode di **Perawatan**. Shizuku memerlukan server API 12+ dan grant normal. Root meminta `su` hanya melalui **Berikan izin root**, bukan saat membuka aplikasi/refresh. Untuk AxManager, ikuti [setup berikut](#akses-axmanager).
+2. Pilih metode di **Perawatan**. Shizuku memerlukan server API 12+ dan grant normal. Root meminta `su` hanya melalui **Izinkan root**, bukan saat membuka aplikasi/refresh. Untuk AxManager, ikuti [setup berikut](#akses-axmanager).
 3. Pilih **Pasang terjemahan**. Game dihentikan sebelum perubahan berkas. Pilihan akses disimpan; Root/AxManager memerlukan koneksi ulang lewat tombol izin setelah aplikasi/service dimulai ulang. Tidak ada fallback otomatis atau pergantian metode selama operasi.
 
 Jika kedua paket terpasang, pilih resource Global yang siap, lalu Galaxy Store, lalu paket terpasang pertama. Paket aktif dibekukan selama sesi.
@@ -98,11 +98,11 @@ Berkas resmi game tidak ditimpa. Mutasi dibatasi pada path WuwaID di versi resou
 
 ### UID kustom
 
-Teks maksimal **32 unit UTF-16**; spasi tepi dipangkas. Input kosong, karakter kontrol, dan pemisah baris ditolak. Ini mengganti teks tampilan, bukan UID akun. Pemasangan biasa menyalin PAK utuh; UID kustom mengubah salinan privat lalu mengemas ulang PAK. Reset mengembalikan PAK rilis asli dan format UID bawaan game. UID contoh di browser bukan data akun.
+Teks maksimal **32 unit UTF-16**; spasi tepi dipangkas. Input kosong, karakter kontrol, dan pemisah baris ditolak. Ini mengganti teks tampilan, bukan UID akun. Pemasangan biasa menyalin PAK utuh; UID kustom mengubah salinan privat lalu mengemas ulang PAK. Tombol **Pulihkan** mengembalikan PAK rilis asli dan format UID bawaan game. UID contoh di browser bukan data akun.
 
 ### Pembaruan aplikasi
 
-Updater build Android release memeriksa stable terbaru saat startup dan melalui **Perawatan → Pembaruan aplikasi → Periksa pembaruan**. Unduh APK, tunggu verifikasi, lalu konfirmasikan dialog Android. Update tidak dipasang diam-diam, tidak menghapus data/PAK, tidak memerlukan Root/Shizuku, dan tidak berjalan bersama mutasi PAK. Batal/gagal bukan sukses. Browser, desktop, dan debug tidak menyediakan updater release.
+Updater build Android release memeriksa stable terbaru saat startup dan melalui **Perawatan → Pembaruan aplikasi → Periksa**. Unduh APK, tunggu verifikasi, lalu konfirmasikan dialog Android. Update tidak dipasang diam-diam, tidak menghapus data/PAK, tidak memerlukan Root/Shizuku, dan tidak berjalan bersama mutasi PAK. Batal/gagal bukan sukses. Browser, desktop, dan debug tidak menyediakan updater release.
 
 Sebelum membuka installer, periksa nama aset, ukuran/SHA-256, package `com.titotfp.wuwaid`, versi/tag, versionCode lebih tinggi, signer rilis, minSdk, dan ABI ARM64. Android memeriksa signature akhir. [Kontrak release dan upgrade](#release-dan-upgrade) memuat identitas, signing, dan checklist QA.
 
@@ -275,7 +275,7 @@ Tujuh APK publik v0.1.0–v0.3.4 memakai package `com.titotfp.wuwaid`, versionCo
 2cb1b4fed5446cf52018b5d56d58c379d7328022c1ba17278c19c0002e484df9
 ```
 
-Konfigurasi rebuild: versionCode **8**, versionName **0.4.0**. Untuk setiap release, naikkan `bundle.android.versionCode` dari code publik terakhir dan samakan versi Tauri, Cargo, dan npm. Jangan turunkan code atau mengganti package/signing key. Jangan memakai `adb install -d` sebagai bukti upgrade normal.
+Target rilis stabil: versionName **1.0.0**, versionCode **9**. Code ini lebih tinggi dari APK publik v0.3.4/code 7 dan kandidat QA Tauri 0.4.0/code 8. Samakan versi Tauri, Cargo, dan npm beserta lockfile. Untuk release berikutnya, naikkan `bundle.android.versionCode` dari code publik terakhir. Jangan turunkan code atau mengganti package/signing key. Jangan memakai `adb install -d` sebagai bukti upgrade normal.
 
 Gunakan private keystore rilis asli. Sediakan dari secret store lokal/CI, bukan Git/chat:
 
@@ -290,15 +290,34 @@ npm run tauri android build -- --apk --target aarch64
 
 Task `verifyUpgradeSigning` memeriksa sertifikat alias dan versionCode sebelum build. Secret tidak lengkap atau sertifikat berbeda menggagalkan build; tidak ada fallback debug atau pembuatan key baru. Sertifikat publik dalam APK tidak dapat menggantikan private key.
 
-Workflow release dipicu manual pada tag yang sudah ada. Workflow memeriksa package/version/certificate APK final dan alignment 16 KiB, lalu mengunggah kandidat signed beserta checksum sebagai artifact QA selama 14 hari. `upgrade_qa_completed=false` (default) tidak memublikasikan GitHub Release; set `true` hanya setelah pengguna menguji source/tag yang sama. Keystore sementara dihapus meskipun job gagal. Ikuti [prosedur migrasi](#instalasi-dan-migrasi) dan [checklist QA updater](#qa-updater-wajib).
+Workflow release dipicu manual pada tag yang sudah ada; pilih tag yang sama sebagai workflow ref, bukan `main`. Fase kandidat membangun dan memverifikasi APK signed, menjalankan tes host, lalu menyimpan APK/checksum sebagai artifact immutable selama 14 hari. `upgrade_qa_completed=false` (default) tidak memublikasikan release. Fase publikasi memerlukan `upgrade_qa_completed=true` dan ID artifact yang sudah lolos QA; asal repository/workflow, commit/tag, checksum, identitas APK, sertifikat, dan alignment diperiksa ulang. APK tidak dibangun atau ditandatangani ulang saat publikasi. Keystore sementara dihapus meskipun job gagal.
 
-Release yang disetujui memakai `prerelease: false`, termasuk tag `v0.x`, agar tersedia pada updater kanal stabil. Nama aset wajib `WuwaID-Mobile-v<versi>.apk`, tepat satu aset cocok, dan checksum harus tersedia melalui GitHub digest atau `SHA256sums.txt`; ini kontrak updater, jangan ubah tanpa migrasi updater.
+Publikasikan `v1.0.0` sebagai rilis stabil (`draft: false`, `prerelease: false`) setelah QA, agar tersedia pada updater kanal stabil. Nama aset wajib `WuwaID-Mobile-v1.0.0.apk`, tepat satu aset cocok, beserta `SHA256sums.txt`. Pola untuk rilis berikutnya tetap `WuwaID-Mobile-v<versi>.apk`; updater menerima SHA-256 dari GitHub digest atau checksum tersebut. Jangan ubah kontrak ini tanpa migrasi updater.
+
+### Publikasi v1.0.0
+
+1. Commit dan push source yang sudah ditinjau. Buat dan push tag `v1.0.0` pada commit yang sama; jangan pindahkan tag setelah QA.
+2. Bangun kandidat signed tanpa memublikasikan release:
+
+   ```sh
+   gh workflow run release.yml --ref v1.0.0 -f tag=v1.0.0 -F upgrade_qa_completed=false
+   ```
+
+3. Ambil artifact `wuwaidmobile-signed-v1.0.0`. Catat **ID artifact** dari ringkasan run atau URL artifact; ini bukan ID run. Verifikasi APK `com.titotfp.wuwaid`, versi `1.0.0`, code `9`, sertifikat di atas, dan checksum. Jalankan [QA upgrade/updater](#qa-updater-wajib) pada perangkat tanpa uninstall/clear data. APK debug atau penerimaan kandidat 0.4.0 tidak menggantikan QA kandidat signed 1.0.0.
+4. Setelah artifact tersebut lulus QA, publikasikan APK yang sama:
+
+   ```bash
+   read -r -p "ID artifact signed yang lolos QA: " CANDIDATE_ARTIFACT_ID
+   gh workflow run release.yml --ref v1.0.0 -f tag=v1.0.0 -F upgrade_qa_completed=true -f candidate_artifact_id="$CANDIDATE_ARTIFACT_ID"
+   ```
+
+5. Pastikan GitHub Release bukan draft/prerelease, menjadi stable terbaru, dan memuat APK serta checksum yang sama dengan hasil QA. Artifact kedaluwarsa atau salah asal/commit harus ditolak; buat dan uji kandidat baru, bukan membangun ulang diam-diam saat publikasi. Jangan memakai checkbox QA untuk melewati kegagalan upgrade, installer, atau hasil game.
 
 ### QA updater wajib
 
 1. Mulai dari APK publik lama; pasang kandidat dengan `adb install -r`, tanpa uninstall/clear data. Uji deteksi, migrasi, recovery, UID, dan game; pastikan mount/signature benar dan hash berkas game bawaan tidak berubah sebelum/sesudah. APK debug hanya menguji migrasi berkas; package berbeda tidak menguji PackageManager/data upgrade in-place.
 2. Periksa banner, versi terpasang, dan tombol manual. Jika tidak ada stable yang lebih baru (termasuk hanya ada prerelease), UI harus menyatakan belum ada update stabil, bukan bahwa versi terpasang terbaru.
-3. Uji unduh/pasang normal hanya dengan stable resmi yang lebih baru, misalnya `0.4.1`/code 9, package dan key yang sama serta aset/checksum sesuai kontrak. Jangan gunakan metadata palsu atau menurunkan versionCode.
+3. Uji unduh/pasang normal hanya dengan stable resmi yang lebih baru: kandidat `0.4.0`/code 8 → `1.0.0`/code 9, lalu untuk rilis berikutnya `1.0.0`/code 9 → `1.0.1`/code 10. Package/key dan aset/checksum harus sesuai kontrak. Jangan gunakan metadata palsu atau menurunkan versionCode.
 4. Uji perbandingan versi numerik (`0.4.9` → `0.4.10`), progres, ukuran/digest, dan penolakan APK dengan package, signing/tag, versionCode, minSdk, ABI, atau signature tidak sesuai. APK invalid tidak boleh mencapai installer.
 5. Tolak izin sumber tak dikenal lalu coba lagi setelah grant; tutup app dari pengaturan izin dan buka lagi untuk memastikan APK cache diverifikasi ulang. Batalkan installer: jangan laporkan sukses dan sediakan retry. Setelah sukses, versi baru harus terbuka, data/PAK bertahan, dan downgrade tidak ditawarkan.
 6. Putuskan jaringan saat cek/unduh atau hentikan app saat download. Partial/corrupt cache tidak siap dipasang dan harus dapat diunduh ulang. Background check tidak boleh mencuri fokus/draft UID atau memblokir akses game.
