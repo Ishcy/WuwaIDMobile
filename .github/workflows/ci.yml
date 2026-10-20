@@ -1,120 +1,124 @@
-name: Android CI
+name: CI
 
 on:
-  push:
-    branches: [main, "codex/**"]
   pull_request:
+  push:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  verify:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
+  checks:
+    name: Frontend and Rust checks
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out source
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-java@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Tauri Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            build-essential \
+            file \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            patchelf
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Check, test and build frontend
+        run: |
+          npm run check
+          npm test
+          npm run build
+
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+
+      - name: Run Rust lints
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+      - name: Run Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets
+
+  android:
+    name: Build Android APK and host-test updater
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
 
-      - uses: android-actions/setup-android@v4
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
 
-      - name: Install Android SDK 35 and native toolchain
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.0.12077973" "cmake;3.22.1"
+      - name: Set up Rust Android target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
 
-      - uses: gradle/actions/setup-gradle@v4
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
 
-      - name: Test native helper security on host
-        run: |
-          g++ -std=c++20 -Wall -Wextra -Werror -DWUWA_HOST_TEST app/src/main/cpp/root_file_helper.cpp -o /tmp/wuwa-root-helper
-          python3 app/src/test/native/root_helper_security_test.py /tmp/wuwa-root-helper
+      - name: Install Android SDK packages
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.3.13750724'
 
-      - name: Run unit tests and coverage
-        run: ./gradlew --no-daemon testDebugUnitTest jacocoTestReport
+      - name: Set NDK path
+        run: echo "NDK_HOME=$ANDROID_HOME/ndk/27.3.13750724" >> "$GITHUB_ENV"
 
-      - name: Run Android lint
-        run: ./gradlew --no-daemon lintDebug
+      - name: Install JavaScript dependencies
+        run: npm ci
 
-      - name: Build debug APK
-        run: ./gradlew --no-daemon assembleDebug
+      - name: Build Android debug APK
+        run: npm run tauri android build -- --debug --apk --target aarch64
 
-      - name: Verify packaged root helper
-        run: unzip -l app/build/outputs/apk/debug/app-debug.apk | grep 'lib/arm64-v8a/libwuwa_root_helper.so'
+      - name: Set up Java for Robolectric API 36
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
 
-      # RootHelperPackagingTest also executes a PING exchange. It is kept as an
-      # instrumentation/device gate because GitHub's x86_64 emulator cannot run
-      # the arm64-only Wuthering Waves helper ABI.
+      - name: Run updater host behavior tests
+        working-directory: src-tauri/gen/android
+        run: ./gradlew :app:testUniversalDebugUnitTest --no-configuration-cache --console=plain
 
-      - name: Publish coverage summary
-        if: always() && hashFiles('app/build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml') != ''
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          import os
-          import xml.etree.ElementTree as ET
-
-          report = "app/build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml"
-          root = ET.parse(report).getroot()
-          counters = {counter.attrib["type"]: counter.attrib for counter in root.findall("counter")}
-
-          def percentage(kind: str) -> str:
-              values = counters.get(kind)
-              if not values:
-                  return "n/a"
-              missed = int(values["missed"])
-              covered = int(values["covered"])
-              total = missed + covered
-              return "100.00%" if total == 0 else f"{covered / total * 100:.2f}%"
-
-          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
-              summary.write("## Unit test coverage\n\n")
-              summary.write("| Metric | Coverage |\n")
-              summary.write("|---|---:|\n")
-              summary.write(f"| Lines | {percentage('LINE')} |\n")
-              summary.write(f"| Branches | {percentage('BRANCH')} |\n")
-              summary.write(f"| Instructions | {percentage('INSTRUCTION')} |\n")
-          PY
-
-      - name: Upload unit test reports
-        if: always()
+      - name: Upload Android debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: unit-test-reports
-          path: |
-            app/build/test-results/testDebugUnitTest/**/*.xml
-            app/build/reports/tests/testDebugUnitTest/**
-          if-no-files-found: warn
-          retention-days: 14
-
-      - name: Upload coverage report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: unit-test-coverage
-          path: app/build/reports/jacoco/jacocoTestReport/**
-          if-no-files-found: warn
-          retention-days: 14
-
-      - name: Upload lint report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-lint-report
-          path: app/build/reports/lint-results-debug.*
-          if-no-files-found: warn
-          retention-days: 14
-
-      - name: Upload debug APK
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: wuwaid-mobile-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: wuwaidmobile-android-debug
+          path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
           if-no-files-found: error
           retention-days: 14

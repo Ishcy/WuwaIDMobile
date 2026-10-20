@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Terjemahan Bahasa Indonesia untuk Wuthering Waves."
+    />
+    <meta name="theme-color" content="#f5f3ef" />
+    <script>
+      // Resolve before CSS paints; storage may be unavailable in a WebView.
+      (() => {
+        let preference = "system";
+        try {
+          const saved = localStorage.getItem("wuwaidmobile.theme");
+          if (["light", "dark", "system"].includes(saved)) preference = saved;
+        } catch {}
+        const theme = preference === "system"
+          ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+          : preference;
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themePreference = preference;
+        document.querySelector('meta[name="theme-color"]').content =
+          theme === "dark" ? "#15151b" : "#f5f3ef";
+      })();
+    </script>
+    <link rel="stylesheet" href="/src/styles.css" />
+    <title>WuwaIDMobile</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+
+  <body>
+    <a class="skip-link" href="#main-content">Langsung ke konten</a>
+    <div id="app"></div>
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    <dialog id="confirm-dialog" aria-labelledby="dialog-title">
+      <div class="dialog-icon">!</div>
+      <h2 id="dialog-title">Hapus terjemahan?</h2>
+      <p>Hapus terjemahan simulasi dan reset tampilan UID? File game tidak diubah.</p>
+      <div class="actions">
+        <button class="btn btn-secondary" id="cancel-uninstall">Batal</button>
+        <button class="btn btn-danger" id="confirm-uninstall">
+          Hapus
+        </button>
+      </div>
+    </dialog>
+  </body>
+</html>
